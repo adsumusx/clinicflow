@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS push_devices;
+DROP TABLE IF EXISTS trusted_devices;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS professionals;
+DROP TABLE IF EXISTS memberships;
+DROP TABLE IF EXISTS role_permissions;
+DROP TABLE IF EXISTS roles;
+DROP TABLE IF EXISTS permissions;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS units;
+DROP TABLE IF EXISTS organizations;

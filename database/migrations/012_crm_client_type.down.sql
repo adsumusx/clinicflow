@@ -1,0 +1,1 @@
+DROP INDEX clients_active_type_name_idx;

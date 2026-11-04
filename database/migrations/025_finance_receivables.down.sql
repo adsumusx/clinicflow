@@ -1,0 +1,16 @@
+DROP INDEX receivables_finance_list_idx;
+DROP INDEX receivables_recurrence_installment_unique;
+ALTER TABLE receivables
+  DROP CONSTRAINT receivables_recurrence_fk,
+  DROP CONSTRAINT receivables_cancellation_consistent,
+  DROP CONSTRAINT receivables_installment_positive,
+  DROP CONSTRAINT receivables_installment_pair,
+  DROP CONSTRAINT receivables_competence_first_day,
+  DROP CONSTRAINT receivables_description_length,
+  DROP COLUMN cancellation_reason,
+  DROP COLUMN cancelled_at,
+  DROP COLUMN installment_number,
+  DROP COLUMN recurrence_id,
+  DROP COLUMN competence_on,
+  DROP COLUMN description;
+DROP TABLE receivable_recurrences;

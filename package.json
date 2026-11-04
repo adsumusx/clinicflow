@@ -1,0 +1,49 @@
+{
+  "name": "clinicflow-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "node --env-file-if-exists=.env server/index.mjs",
+    "start": "node --env-file-if-exists=.env server/index.mjs",
+    "start:prod": "node scripts/start-production.mjs",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "node --env-file-if-exists=.env scripts/db/migrate.mjs up",
+    "db:rollback": "node --env-file-if-exists=.env scripts/db/migrate.mjs down",
+    "db:seed": "node --env-file-if-exists=.env scripts/db/seed.mjs",
+    "db:reset": "node --env-file-if-exists=.env scripts/db/reset.mjs",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "check:imports": "node scripts/check-imports.mjs",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:qa:schedule": "node --env-file-if-exists=.env node_modules/vitest/vitest.mjs run database/schedule-qa.integration.test.mjs",
+    "test:qa:finance": "node node_modules/vitest/vitest.mjs run database/finance-qa.integration.test.mjs",
+    "test:watch": "vitest",
+    "check": "npm run check:imports && npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@types/qrcode": "^1.5.6",
+    "pg": "8.23.0",
+    "qrcode": "^1.5.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.1",
+    "jsdom": "28.1.0",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

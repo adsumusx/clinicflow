@@ -1,0 +1,75 @@
+.organization-page,
+.organization-page__header > div,
+.organization-form,
+.organization-form label,
+.membership-list li > span {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.organization-page {
+  gap: var(--space-6);
+  max-width: var(--layout-container-max);
+  margin: 0 auto;
+}
+
+.organization-page__header h1,
+.organization-page__header p {
+  margin: 0;
+}
+
+.organization-page__header span,
+.organization-page__header p,
+.membership-list small {
+  color: var(--color-on-surface-variant);
+}
+
+.organization-page__grid {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.organization-page__message {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  color: var(--color-on-primary-fixed-variant);
+  background: var(--color-primary-fixed);
+}
+
+.organization-form {
+  gap: var(--space-4);
+}
+
+.organization-form input,
+.organization-form select {
+  min-height: var(--size-touch-target);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-container-lowest);
+  font: inherit;
+}
+
+.membership-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.membership-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-outline-variant);
+}
+
+@media (min-width: 760px) {
+  .organization-page__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

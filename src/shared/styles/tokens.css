@@ -1,0 +1,133 @@
+:root {
+  color-scheme: light;
+
+  /* Clinical Serenity: white canvas for all-day use, green kept as accent */
+  --color-background: #ffffff;
+  --color-on-background: #002114;
+  --color-surface: #ffffff;
+  --color-surface-dim: #b8e4cc;
+  --color-surface-bright: #ffffff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #d1fee5;
+  --color-surface-container: #ccf8df;
+  --color-surface-container-high: #c6f2da;
+  --color-surface-container-highest: #c1ecd4;
+  --color-surface-variant: #c1ecd4;
+  --color-on-surface: #002114;
+  --color-on-surface-variant: #404943;
+  --color-inverse-surface: #0e3727;
+  --color-inverse-on-surface: #cffbe2;
+  --color-surface-tint: #2c694e;
+  --color-outline: #707973;
+  --color-outline-variant: #bfc9c1;
+
+  --color-primary: #0f5238;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #2d6a4f;
+  --color-on-primary-container: #a8e7c5;
+  --color-primary-fixed: #b1f0ce;
+  --color-primary-fixed-dim: #95d4b3;
+  --color-on-primary-fixed: #002114;
+  --color-on-primary-fixed-variant: #0e5138;
+  --color-inverse-primary: #95d4b3;
+
+  --color-secondary: #3e6750;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #bdeacd;
+  --color-on-secondary-container: #426b54;
+  --color-secondary-fixed: #c0edd0;
+  --color-secondary-fixed-dim: #a4d1b4;
+  --color-on-secondary-fixed: #002112;
+  --color-on-secondary-fixed-variant: #264f39;
+
+  --color-tertiary: #004d6c;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #00668e;
+  --color-on-tertiary-container: #b2e0ff;
+  --color-tertiary-fixed: #c6e7ff;
+  --color-tertiary-fixed-dim: #84cffd;
+  --color-on-tertiary-fixed: #001e2d;
+  --color-on-tertiary-fixed-variant: #004c6b;
+
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+  --color-warning: #6b4d00;
+  --color-warning-container: #ffecb3;
+  --color-surface-translucent: rgb(255 255 255 / 92%);
+  --color-surface-lowest-translucent: rgb(255 255 255 / 94%);
+
+  /* Typography */
+  --font-family-sans: Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-size-display-lg: 3rem;
+  --line-height-display-lg: 3.5rem;
+  --font-weight-display-lg: 700;
+  --letter-spacing-display-lg: -0.02em;
+  --font-size-headline-lg: 2rem;
+  --line-height-headline-lg: 2.5rem;
+  --font-weight-headline-lg: 600;
+  --letter-spacing-headline-lg: -0.01em;
+  --font-size-headline-lg-mobile: 1.5rem;
+  --line-height-headline-lg-mobile: 2rem;
+  --font-size-headline-md: 1.5rem;
+  --line-height-headline-md: 2rem;
+  --font-weight-headline-md: 600;
+  --font-size-body-lg: 1.125rem;
+  --line-height-body-lg: 1.75rem;
+  --font-size-body-md: 1rem;
+  --line-height-body-md: 1.5rem;
+  --font-size-body-sm: 0.875rem;
+  --line-height-body-sm: 1.25rem;
+  --font-size-label-md: 0.75rem;
+  --line-height-label-md: 1rem;
+  --font-weight-label-md: 600;
+  --letter-spacing-label-md: 0.05em;
+
+  /* 4px unit with an 8px visual rhythm */
+  --space-unit: 0.25rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-stack-sm: 0.5rem;
+  --space-stack-md: 1rem;
+  --space-stack-lg: 1.5rem;
+  --layout-container-max: 80rem;
+  --layout-gutter: 1.5rem;
+  --layout-margin-mobile: 1rem;
+  --layout-margin-desktop: 2rem;
+  --layout-sidebar-width: 16rem;
+  --layout-mobile-header-height: 4.5rem;
+  --layout-mobile-navigation-height: 4.25rem;
+  --layout-mobile-navigation-max: 40rem;
+  --layout-desktop-header-height: 4.5rem;
+  --layout-profile-max: 14rem;
+
+  /* Shapes and elevation */
+  --radius-sm: 0.125rem;
+  --radius-default: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-full: 9999px;
+  --shadow-level-1: 0 4px 20px rgb(27 67 50 / 5%);
+  --shadow-level-1-hover: 0 6px 24px rgb(27 67 50 / 9%);
+  --shadow-level-2: 0 10px 30px rgb(27 67 50 / 12%);
+  --shadow-navigation: 0 -4px 20px rgb(27 67 50 / 7%);
+  --shadow-avatar: 0 0 0 1px var(--color-primary-fixed-dim);
+  --focus-ring: 0 0 0 3px rgb(132 207 253 / 55%);
+  --blur-overlay: 1.125rem;
+  --size-avatar: 2.25rem;
+  --size-touch-target: 2.75rem;
+  --motion-fast: 150ms;
+  --layer-header: 10;
+  --layer-navigation: 20;
+  --layer-skip-link: 30;
+}

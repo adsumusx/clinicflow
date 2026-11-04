@@ -1,0 +1,5 @@
+DROP INDEX audit_events_target_timeline_idx;
+DROP INDEX receivables_client_timeline_idx;
+DROP INDEX contracts_client_timeline_idx;
+DROP INDEX client_contacts_search_value_idx;
+DROP INDEX clients_active_search_name_idx;

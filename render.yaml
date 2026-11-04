@@ -1,0 +1,32 @@
+databases:
+  - name: clinicflow-db
+    plan: free
+    databaseName: clinicflow
+    user: clinicflow
+
+services:
+  - type: web
+    name: clinicflow
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: clinicflow-db
+          property: connectionString
+      - key: NODE_ENV
+        value: production
+      - key: BOOTSTRAP_ENABLED
+        value: "1"
+      - key: BOOTSTRAP_ORG_NAME
+        value: Clínica Taline Vavassori
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        value: admin@clinicatallinevavassori.local
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: MFA_ENCRYPTION_KEY
+        sync: false
+      - key: PUSH_TOKEN_ENCRYPTION_KEY
+        sync: false

@@ -1,0 +1,16 @@
+DROP TABLE IF EXISTS audit_events;
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS outbox_events;
+DROP TABLE IF EXISTS notification_preferences;
+DROP TABLE IF EXISTS file_links;
+DROP TABLE IF EXISTS files;
+DROP TABLE IF EXISTS fiscal_events;
+DROP TABLE IF EXISTS fiscal_attempts;
+DROP TABLE IF EXISTS fiscal_documents;
+DROP VIEW IF EXISTS receivable_balances;
+DROP TABLE IF EXISTS payments;
+DROP TABLE IF EXISTS payables;
+DROP TABLE IF EXISTS receivables;
+DROP TABLE IF EXISTS financial_categories;
+DROP TABLE IF EXISTS contracts;
+DROP TABLE IF EXISTS plans;

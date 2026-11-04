@@ -1,0 +1,1 @@
+export { FoundationPage } from './FoundationPage'

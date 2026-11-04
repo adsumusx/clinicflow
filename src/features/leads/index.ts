@@ -1,0 +1,16 @@
+export {
+  addProspectInteraction,
+  convertProspect,
+  createProspect,
+  getProspect,
+  listProspects,
+  updateProspect,
+  type ProspectContact,
+  type ProspectInput,
+  type ProspectInteraction,
+  type ProspectInteractionType,
+  type ProspectListResponse,
+  type ProspectOwner,
+  type ProspectRecord,
+  type ProspectStage,
+} from './leadsApi'
