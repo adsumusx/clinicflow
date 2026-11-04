@@ -17,5 +17,6 @@ if (process.env.RENDER_EXTERNAL_URL && !process.env.PASSWORD_RESET_BASE_URL) {
 
 await runNode('scripts/db/prepare-database.mjs')
 await runNode('scripts/db/migrate.mjs')
+await runNode('scripts/db/relax-rls.mjs')
 await runNode('scripts/db/bootstrap-organization.mjs')
 await runNode('server/index.mjs')

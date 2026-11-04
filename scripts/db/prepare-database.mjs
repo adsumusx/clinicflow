@@ -28,8 +28,12 @@ async function prepareDatabase() {
       return
     }
 
-    await client.query('ALTER ROLE CURRENT_USER BYPASSRLS')
-    console.log('BYPASSRLS aplicado à conexão administrativa')
+    try {
+      await client.query('ALTER ROLE CURRENT_USER BYPASSRLS')
+      console.log('BYPASSRLS aplicado à conexão administrativa')
+    } catch (error) {
+      console.warn(`BYPASSRLS indisponível neste banco: ${error.message}`)
+    }
   } finally {
     await client.end()
   }
