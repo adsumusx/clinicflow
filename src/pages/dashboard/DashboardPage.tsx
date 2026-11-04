@@ -1,32 +1,144 @@
-import { Icon } from '@/shared/ui'
+import { useEffect, useState } from 'react'
+import { useAuth } from '@/features/auth'
+import { listReceivables } from '@/features/finance'
+import { listProspects } from '@/features/leads'
+import { getBusinessDashboardReport, listBirthdayReport, type BirthdayReportItem } from '@/features/reports'
+import { getSchedule, type AppointmentRecord } from '@/features/schedule'
+import { EmptyState, Icon } from '@/shared/ui'
 import './DashboardPage.css'
-
-const revenue = [
-  { day: 'Seg', height: 40, value: 'R$ 400' },
-  { day: 'Ter', height: 65, value: 'R$ 650' },
-  { day: 'Qua', height: 80, value: 'R$ 800' },
-  { day: 'Qui', height: 100, value: 'R$ 1.000', current: true },
-  { day: 'Sex', height: 50, value: 'R$ 500' },
-]
-
-const appointments = [
-  { time: '08:00', title: 'Pilates em Grupo', detail: '4 alunos · Estúdio Principal', tone: 'full', badge: 'Lotado' },
-  { time: '09:00', title: 'Sessão Funcional', detail: 'Carlos Eduardo · Estúdio 2', tone: 'available', badge: '2 vagas' },
-  { time: '11:30', title: 'Fisioterapia', detail: 'Marina Souza · Consultório 1', tone: 'confirmed', badge: 'Confirmado' },
-]
 
 interface DashboardPageProps {
   onCreateAppointment: () => void
 }
 
+interface DashboardSnapshot {
+  appointments: AppointmentRecord[]
+  birthdays: BirthdayReportItem[]
+  leadsThisWeek: number
+  pendingBalanceCents: number
+  pendingCount: number
+  receivedCents: number
+}
+
+const emptySnapshot: DashboardSnapshot = {
+  appointments: [],
+  birthdays: [],
+  leadsThisWeek: 0,
+  pendingBalanceCents: 0,
+  pendingCount: 0,
+  receivedCents: 0,
+}
+
+function isoDate(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+function startOfWeek(date: Date) {
+  const copy = new Date(date)
+  const weekday = copy.getDay()
+  copy.setDate(copy.getDate() + (weekday === 0 ? -6 : 1 - weekday))
+  copy.setHours(0, 0, 0, 0)
+  return copy
+}
+
+function money(cents: number) {
+  return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+function clock(value: string) {
+  return new Date(value).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
+function appointmentTone(appointment: AppointmentRecord) {
+  if (appointment.capacity > 0 && appointment.occupancy >= appointment.capacity) return 'full'
+  return 'available'
+}
+
+function appointmentBadge(appointment: AppointmentRecord) {
+  if (appointment.capacity > 1) {
+    const open = Math.max(appointment.capacity - appointment.occupancy, 0)
+    return open === 0 ? 'Lotado' : `${open} ${open === 1 ? 'vaga' : 'vagas'}`
+  }
+  const participant = appointment.participants.find((item) => item.status !== 'cancelled')
+  if (participant?.status === 'confirmed') return 'Confirmado'
+  if (participant?.status === 'attended') return 'Compareceu'
+  return 'Agendado'
+}
+
+function appointmentDetail(appointment: AppointmentRecord) {
+  const names = appointment.participants
+    .filter((item) => item.status !== 'cancelled')
+    .map((item) => item.client.fullName)
+  const place = [appointment.room?.name, appointment.professional.displayName].filter(Boolean)
+  return [names.join(', ') || 'Sem cliente vinculado', ...place].join(' · ')
+}
+
 export function DashboardPage({ onCreateAppointment }: DashboardPageProps) {
+  const { session } = useAuth()
+  const organization = session?.organizations.find((item) => item.id === session.organizationId)
+  const [loading, setLoading] = useState(true)
+  const [snapshot, setSnapshot] = useState<DashboardSnapshot>(emptySnapshot)
+  const today = new Date()
+  const todayLabel = today.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
+  const headingDate = todayLabel.charAt(0).toUpperCase() + todayLabel.slice(1)
+
+  useEffect(() => {
+    const organizationId = session?.organizationId
+    if (!organizationId) return
+    let active = true
+    const dayStart = new Date(today)
+    dayStart.setHours(0, 0, 0, 0)
+    const dayEnd = new Date(today)
+    dayEnd.setHours(23, 59, 59, 999)
+    const weekStart = startOfWeek(today)
+    const todayIso = isoDate(today)
+    const weekIso = isoDate(weekStart)
+
+    setLoading(true)
+    Promise.allSettled([
+      getSchedule(organizationId, dayStart.toISOString(), dayEnd.toISOString()),
+      listReceivables(organizationId),
+      listProspects(organizationId, { pageSize: 100 }),
+      listBirthdayReport(organizationId, { from: todayIso, to: todayIso }),
+      getBusinessDashboardReport(organizationId, { from: weekIso, to: todayIso }),
+    ]).then(([schedule, receivables, prospects, birthdays, business]) => {
+      if (!active) return
+      const appointments = schedule.status === 'fulfilled' && Array.isArray(schedule.value.appointments)
+        ? schedule.value.appointments
+          .filter((item) => item.status !== 'cancelled')
+          .sort((left, right) => left.startsAt.localeCompare(right.startsAt))
+        : []
+      const pending = receivables.status === 'fulfilled' ? receivables.value.summary : undefined
+      const prospectItems = prospects.status === 'fulfilled' && Array.isArray(prospects.value.items)
+        ? prospects.value.items
+        : []
+      const birthdayItems = birthdays.status === 'fulfilled' && Array.isArray(birthdays.value.items)
+        ? birthdays.value.items
+        : []
+      const received = business.status === 'fulfilled' ? business.value.financial?.receivedCents ?? 0 : 0
+      setSnapshot({
+        appointments,
+        birthdays: birthdayItems,
+        leadsThisWeek: prospectItems.filter((item) => item.createdAt >= weekStart.toISOString()).length,
+        pendingBalanceCents: (pending?.openBalanceCents ?? 0) + (pending?.overdueBalanceCents ?? 0),
+        pendingCount: pending?.count ?? 0,
+        receivedCents: received,
+      })
+      setLoading(false)
+    })
+
+    return () => { active = false }
+  }, [session?.organizationId])
+
   return (
     <section className="dashboard-page" aria-labelledby="dashboard-title">
       <header className="page-heading">
         <div>
-          <p className="page-heading__eyebrow">Terça-feira, 1 de setembro</p>
-          <h1 id="dashboard-title">Olá, Ana!</h1>
-          <p>Veja o que está acontecendo hoje na Clínica Serena.</p>
+          <p className="page-heading__eyebrow">{headingDate}</p>
+          <h1 id="dashboard-title">{organization?.name ?? 'Clínica'}</h1>
+          <p>Resumo do que está cadastrado hoje.</p>
         </div>
         <button className="dashboard-heading-action" type="button" onClick={onCreateAppointment}>
           <Icon name="plus" />
@@ -38,19 +150,19 @@ export function DashboardPage({ onCreateAppointment }: DashboardPageProps) {
         <article className="summary-card summary-card--appointments">
           <div>
             <span className="summary-card__label">Consultas hoje</span>
-            <p><strong>12</strong> <span>agendadas</span></p>
+            <p><strong>{loading ? '—' : snapshot.appointments.length}</strong> <span>agendadas</span></p>
           </div>
           <span className="summary-card__icon"><Icon name="calendar" /></span>
         </article>
 
         <article className="summary-card summary-card--pending">
           <div className="summary-card__heading"><Icon name="alert" /><span>Pendentes</span></div>
-          <p><strong>3</strong><span>R$ 450,00</span></p>
+          <p><strong>{loading ? '—' : snapshot.pendingCount}</strong><span>{loading ? '' : money(snapshot.pendingBalanceCents)}</span></p>
         </article>
 
         <article className="summary-card summary-card--leads">
           <div className="summary-card__heading"><Icon name="user-plus" /><span>Novos leads</span></div>
-          <p><strong>5</strong><span>esta semana</span></p>
+          <p><strong>{loading ? '—' : snapshot.leadsThisWeek}</strong><span>esta semana</span></p>
         </article>
       </div>
 
@@ -58,9 +170,9 @@ export function DashboardPage({ onCreateAppointment }: DashboardPageProps) {
         <button className="quick-action quick-action--primary" type="button" onClick={onCreateAppointment}>
           <Icon name="plus" /> Nova consulta
         </button>
-        <button className="quick-action quick-action--secondary" type="button">
+        <a className="quick-action quick-action--secondary" href="#clients">
           <Icon name="user-plus" /> Novo cliente
-        </button>
+        </a>
       </div>
 
       <div className="dashboard-grid">
@@ -69,41 +181,45 @@ export function DashboardPage({ onCreateAppointment }: DashboardPageProps) {
             <div><span>Agenda do dia</span><h2>Próximos atendimentos</h2></div>
             <a href="#agenda">Ver agenda completa <Icon name="arrow-right" /></a>
           </header>
-          <ol className="schedule-preview__list">
-            {appointments.map((appointment) => (
-              <li key={appointment.time}>
-                <time>{appointment.time}</time>
-                <span className={`schedule-preview__marker schedule-preview__marker--${appointment.tone}`} />
-                <div><strong>{appointment.title}</strong><span>{appointment.detail}</span></div>
-                <span className={`appointment-badge appointment-badge--${appointment.tone}`}>{appointment.badge}</span>
-              </li>
-            ))}
-          </ol>
+          {snapshot.appointments.length === 0 ? (
+            <EmptyState compact title="Nenhum atendimento hoje" description="Os horários cadastrados na agenda aparecem aqui." />
+          ) : (
+            <ol className="schedule-preview__list">
+              {snapshot.appointments.map((appointment) => {
+                const tone = appointmentTone(appointment)
+                return (
+                  <li key={appointment.id}>
+                    <time>{clock(appointment.startsAt)}</time>
+                    <span className={`schedule-preview__marker schedule-preview__marker--${tone}`} />
+                    <div><strong>{appointment.service.name}</strong><span>{appointmentDetail(appointment)}</span></div>
+                    <span className={`appointment-badge appointment-badge--${tone}`}>{appointmentBadge(appointment)}</span>
+                  </li>
+                )
+              })}
+            </ol>
+          )}
         </article>
 
         <article className="dashboard-panel revenue-panel">
           <header className="panel-heading panel-heading--revenue">
-            <div><span>Receita da semana</span><h2>R$ 4.250,00</h2></div>
-            <span className="revenue-trend"><Icon name="trend-up" /> +12%</span>
+            <div><span>Receita da semana</span><h2>{loading ? '—' : money(snapshot.receivedCents)}</h2></div>
           </header>
-          <div className="revenue-chart" aria-label="Receita de segunda a sexta-feira">
-            {revenue.map((item) => (
-              <div className={`revenue-chart__item${item.current ? ' revenue-chart__item--current' : ''}`} key={item.day}>
-                <span className="revenue-chart__value">{item.value}</span>
-                <span className="revenue-chart__bar" style={{ height: `${item.height}%` }} />
-                <span className="revenue-chart__day">{item.day}</span>
-              </div>
-            ))}
-          </div>
+          {snapshot.receivedCents === 0 ? (
+            <EmptyState compact title="Nenhum recebimento nesta semana" description="Os pagamentos lançados no financeiro entram neste total." />
+          ) : (
+            <p className="dashboard-note">Total recebido de segunda até hoje.</p>
+          )}
         </article>
 
         <article className="birthday-card">
           <div>
             <span className="birthday-card__label"><Icon name="cake" /> Aniversariante do dia</span>
-            <h2>Mariana Silva</h2>
-            <button type="button">Enviar mensagem <Icon name="arrow-right" /></button>
+            {snapshot.birthdays.length === 0 ? (
+              <h2>Nenhum aniversariante hoje</h2>
+            ) : snapshot.birthdays.map((birthday) => (
+              <h2 key={birthday.clientId}>{birthday.fullName}</h2>
+            ))}
           </div>
-          <div className="birthday-card__confetti" aria-hidden="true"><i /><i /><i /><i /></div>
         </article>
       </div>
     </section>

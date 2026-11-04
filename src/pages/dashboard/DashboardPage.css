@@ -142,7 +142,7 @@
 }
 
 .quick-action { width: 100%; }
-.quick-action--secondary { color: var(--color-primary); background: var(--color-surface-container-high); }
+.quick-action--secondary { color: var(--color-primary); background: var(--color-surface-container-high); text-decoration: none; }
 
 .dashboard-grid {
   display: grid;
@@ -201,6 +201,7 @@
 .birthday-card { position: relative; grid-column: 1 / -1; overflow: hidden; padding: var(--space-6); border: 0; color: var(--color-on-tertiary-container); background: linear-gradient(110deg, var(--color-tertiary-container), var(--color-surface-dim)); }
 .birthday-card__label { display: flex; align-items: center; gap: var(--space-2); color: var(--color-on-tertiary-container); font-size: var(--font-size-label-md); font-weight: var(--font-weight-label-md); letter-spacing: var(--letter-spacing-label-md); text-transform: uppercase; }
 .birthday-card h2 { margin: var(--space-2) 0; color: var(--color-on-surface); font-size: var(--font-size-headline-md); }
+.dashboard-note { margin: 0 var(--space-6) var(--space-5); color: var(--color-on-surface-variant); }
 .birthday-card button { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; color: var(--color-on-tertiary-container); background: transparent; cursor: pointer; font-weight: var(--font-weight-label-md); }
 .birthday-card button .icon { width: 1rem; height: 1rem; }
 .birthday-card__confetti { position: absolute; inset: 0 0 0 auto; width: 14rem; }

@@ -49,12 +49,13 @@ describe('App', () => {
     expect(
       await screen.findByRole('heading', {
         level: 1,
-        name: 'Olá, Ana!',
+        name: 'Clínica Serena',
       }),
     ).toBeInTheDocument()
     expect(screen.getByText('Agenda do dia')).toBeInTheDocument()
     expect(screen.getByText('Receita da semana')).toBeInTheDocument()
-    expect(screen.getByText('Mariana Silva')).toBeInTheDocument()
+    expect(await screen.findByText('Nenhum atendimento hoje')).toBeInTheDocument()
+    expect(screen.getByText('Nenhum aniversariante hoje')).toBeInTheDocument()
     expect(
       screen.getByRole('navigation', { name: 'Navegação principal' }),
     ).toBeInTheDocument()
