@@ -68,105 +68,33 @@ describe('App', () => {
     ).toHaveAttribute('href', '#main-content')
   })
 
-  it('navega para a Agenda e demonstra os estados operacionais', async () => {
+  it('abre a Agenda sem horários inventados', async () => {
     window.location.hash = '#agenda'
     render(<App />)
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Agenda' })).toBeInTheDocument()
-    expect(screen.getByText('Lotado (4/4)')).toBeInTheDocument()
-    expect(screen.getByText('2 vagas')).toBeInTheDocument()
-    expect(screen.getByText('2 alunos aguardam vaga')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Agenda' })).toHaveAttribute('aria-current', 'page')
-
-    fireEvent.click(screen.getByRole('button', { name: /Notificar/ }))
-    expect(screen.getByText('Notificação enviada aos interessados')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Adicionar agendamento' }))
-    expect(
-      screen.getByRole('dialog', { name: 'Adicionar à agenda' }),
-    ).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
-    expect(screen.getByText('Avaliação postural')).toBeInTheDocument()
-    expect(screen.getByText('Agendamento confirmado')).toBeInTheDocument()
-    expect(screen.getByText('Lucas Mendes')).toBeInTheDocument()
-  })
-
-  it('grava no card os dados preenchidos no novo agendamento', async () => {
-    window.location.hash = '#agenda'
-    render(<App />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Novo agendamento' }))
-    fireEvent.change(screen.getByLabelText('Cliente'), { target: { value: 'Marina Souza' } })
-    fireEvent.change(screen.getByLabelText('Serviço'), { target: { value: 'Fisioterapia' } })
-    fireEvent.change(screen.getByLabelText('Data'), { target: { value: '2026-09-02' } })
-    fireEvent.change(screen.getByLabelText('Horário'), { target: { value: '11:30' } })
-    fireEvent.change(screen.getByLabelText('Local'), { target: { value: 'Estúdio Principal' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
-
-    expect(screen.getByText('Agendamento confirmado')).toBeInTheDocument()
-    expect(screen.getByText('quarta-feira, 2 de setembro · 9 atendimentos')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Fisioterapia' })).toBeInTheDocument()
-    expect(screen.getByText('Marina Souza')).toBeInTheDocument()
-    expect(screen.getByText('11:30')).toBeInTheDocument()
-    expect(screen.queryByText('Avaliação postural')).not.toBeInTheDocument()
-    expect(screen.queryByText('Lucas Mendes')).not.toBeInTheDocument()
-  })
-
-  it('mantém o conteúdo da Agenda coerente com o dia selecionado', async () => {
-    window.location.hash = '#agenda'
-    render(<App />)
-
-    const wednesdayButton = await screen.findByRole('button', { name: /Qua\s*2/ })
-    fireEvent.click(wednesdayButton)
-
-    expect(
-      screen.getByText('quarta-feira, 2 de setembro · 9 atendimentos'),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByLabelText('Horários de quarta-feira, 2 de setembro'),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Fisioterapia individual' })).toBeInTheDocument()
+    expect(document.querySelector('.page-heading__eyebrow')).toHaveTextContent('Clínica Serena')
+    expect(screen.getByText('Nenhum atendimento neste dia')).toBeInTheDocument()
+    expect(screen.getByText(/0 atendimentos/)).toBeInTheDocument()
+    expect(screen.queryByText('Carlos Eduardo')).not.toBeInTheDocument()
+    expect(screen.queryByText('Pilates em Grupo')).not.toBeInTheDocument()
     expect(screen.queryByText('Lotado (4/4)')).not.toBeInTheDocument()
-    expect(screen.queryByText('2 alunos aguardam vaga')).not.toBeInTheDocument()
-    expect(wednesdayButton).toHaveAttribute('aria-pressed', 'true')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Hoje' }))
-    expect(
-      screen.getByText('terça-feira, 1 de setembro · 12 atendimentos'),
-    ).toBeInTheDocument()
-    expect(screen.getByText('Lotado (4/4)')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Fisioterapia individual' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Agenda' })).toHaveAttribute('aria-current', 'page')
   })
 
-  it('preserva agendamentos de dias diferentes e avança a semana', async () => {
+  it('mantém a Agenda vazia ao trocar o dia e a semana', async () => {
     window.location.hash = '#agenda'
     render(<App />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Novo agendamento' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
-    expect(screen.getByText('Lucas Mendes')).toBeInTheDocument()
+    const nextWeek = await screen.findByRole('button', { name: 'Próxima semana' })
+    fireEvent.click(nextWeek)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Novo agendamento' }))
-    fireEvent.change(screen.getByLabelText('Cliente'), { target: { value: 'Ana Costa' } })
-    fireEvent.change(screen.getByLabelText('Data'), { target: { value: '2026-09-02' } })
-    fireEvent.change(screen.getByLabelText('Horário'), { target: { value: '15:00' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar agendamento' }))
-
-    expect(screen.getByText('quarta-feira, 2 de setembro · 9 atendimentos')).toBeInTheDocument()
-    expect(screen.getByText('Ana Costa')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: /Ter\s*1/ }))
-    expect(screen.getByText('Lucas Mendes')).toBeInTheDocument()
-    expect(screen.queryByText('Ana Costa')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Próxima semana' }))
-    expect(screen.getByRole('button', { name: /Ter\s*8/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByText('terça-feira, 8 de setembro · 0 atendimentos')).toBeInTheDocument()
+    expect(screen.getByText(/0 atendimentos/)).toBeInTheDocument()
+    expect(screen.getByText('Nenhum atendimento neste dia')).toBeInTheDocument()
+    expect(screen.queryByText('Carlos Eduardo')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Hoje' }))
-    expect(screen.getByText('Lucas Mendes')).toBeInTheDocument()
-    expect(screen.getByText('terça-feira, 1 de setembro · 12 atendimentos')).toBeInTheDocument()
+    expect(screen.getByText(/0 atendimentos/)).toBeInTheDocument()
   })
 
   it('ativa o botão escolhido e envia a disponibilidade preenchida', async () => {

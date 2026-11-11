@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Icon, SuccessState } from '@/shared/ui'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useAuth } from '@/features/auth'
 import type { AppointmentRecord } from '@/features/schedule'
+import { EmptyState, Icon } from '@/shared/ui'
 import { ScheduleOperations } from './ScheduleOperations'
 import './AgendaPage.css'
 
@@ -10,34 +11,10 @@ interface AgendaDay {
   iso: string
   fullLabel: string
   today?: boolean
-  appointmentCount: number
-  nextFree: string
-  occupancy: string
-}
-
-interface CreatedAppointment {
-  id: string
-  client: string
-  service: string
-  date: string
-  time: string
-  room: string
 }
 
 type TimelineSlot =
   | { id: string; time: string; variant: 'completed'; title: string }
-  | {
-      id: string
-      time: string
-      variant: 'featured'
-      title: string
-      place: string
-      duration: string
-      badge: string
-      full: boolean
-      attendees: string[]
-      waitlist: number
-    }
   | {
       id: string
       time: string
@@ -49,82 +26,6 @@ type TimelineSlot =
       initials: string
       note: string
     }
-  | { id: string; time: string; variant: 'empty' }
-  | {
-      id: string
-      time: string
-      variant: 'created'
-      title: string
-      place: string
-      duration: string
-      client: string
-      initials: string
-    }
-
-const demoWeekMonday = '2026-08-31'
-const demoToday = '2026-09-01'
-
-const demoDays: AgendaDay[] = [
-  { weekday: 'Seg', day: 31, iso: '2026-08-31', fullLabel: 'segunda-feira, 31 de agosto', appointmentCount: 8, nextFree: '14:00', occupancy: '54%' },
-  { weekday: 'Ter', day: 1, iso: '2026-09-01', fullLabel: 'terça-feira, 1 de setembro', today: true, appointmentCount: 12, nextFree: '10:00', occupancy: '78%' },
-  { weekday: 'Qua', day: 2, iso: '2026-09-02', fullLabel: 'quarta-feira, 2 de setembro', appointmentCount: 9, nextFree: '11:00', occupancy: '64%' },
-  { weekday: 'Qui', day: 3, iso: '2026-09-03', fullLabel: 'quinta-feira, 3 de setembro', appointmentCount: 6, nextFree: '09:00', occupancy: '41%' },
-  { weekday: 'Sex', day: 4, iso: '2026-09-04', fullLabel: 'sexta-feira, 4 de setembro', appointmentCount: 10, nextFree: '15:00', occupancy: '83%' },
-]
-
-const serviceDurations: Record<string, string> = {
-  'Avaliação postural': '50 min',
-  Fisioterapia: '50 min',
-  'Pilates individual': '60 min',
-}
-
-const schedules: Record<string, TimelineSlot[]> = {
-  '2026-08-31': [
-    { id: 'mon-1', time: '07:30', variant: 'completed', title: 'Alongamento matinal' },
-    { id: 'mon-2', time: '13:00', variant: 'client', title: 'Reavaliação', place: 'Consultório 2', badge: 'Confirmado', client: 'Helena Prado', initials: 'HP', note: 'retorno' },
-    { id: 'mon-3', time: '14:00', variant: 'empty' },
-  ],
-  '2026-09-01': [
-    { id: 'tue-1', time: '07:00', variant: 'completed', title: 'Personal Training' },
-    {
-      id: 'tue-2', time: '08:00', variant: 'featured', title: 'Pilates em Grupo',
-      place: 'Estúdio Principal', duration: '60 min', badge: 'Lotado (4/4)', full: true,
-      attendees: ['MS', 'JP', 'AC'], waitlist: 2,
-    },
-    {
-      id: 'tue-3', time: '09:00', variant: 'client', title: 'Sessão Funcional',
-      place: 'Estúdio Secundário', badge: '2 vagas', client: 'Carlos Eduardo', initials: 'CE', note: 'confirmado',
-    },
-    { id: 'tue-4', time: '10:00', variant: 'empty' },
-  ],
-  '2026-09-02': [
-    { id: 'wed-1', time: '08:00', variant: 'completed', title: 'Mobilidade de coluna' },
-    {
-      id: 'wed-2', time: '09:30', variant: 'client', title: 'Fisioterapia individual',
-      place: 'Consultório 1', badge: 'Confirmado', client: 'Marina Costa', initials: 'MC', note: 'sessão 4',
-    },
-    {
-      id: 'wed-3', time: '11:00', variant: 'client', title: 'Pilates solo',
-      place: 'Estúdio Principal', badge: '1 vaga', client: 'Paulo Henrique', initials: 'PH', note: 'confirmado',
-    },
-  ],
-  '2026-09-03': [
-    { id: 'thu-1', time: '09:00', variant: 'empty' },
-    {
-      id: 'thu-2', time: '10:30', variant: 'client', title: 'Grupo de mobilidade',
-      place: 'Estúdio Principal', badge: '3 vagas', client: 'Rita Gomes', initials: 'RG', note: 'confirmada',
-    },
-  ],
-  '2026-09-04': [
-    {
-      id: 'fri-1', time: '15:00', variant: 'empty',
-    },
-    {
-      id: 'fri-2', time: '16:00', variant: 'client', title: 'Pilates clínico',
-      place: 'Consultório 2', badge: 'Confirmado', client: 'João Batista', initials: 'JB', note: 'primeira consulta',
-    },
-  ],
-}
 
 const weekdayShort = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const weekdayLong = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado']
@@ -154,8 +55,7 @@ function mondayOf(iso: string) {
 }
 
 function localDay(value: string) {
-  const date = new Date(value)
-  return formatIso(date)
+  return formatIso(new Date(value))
 }
 
 function localClock(value: string) {
@@ -163,9 +63,11 @@ function localClock(value: string) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-function buildDay(iso: string): AgendaDay {
-  const fixture = demoDays.find((day) => day.iso === iso)
-  if (fixture) return fixture
+function todayIso() {
+  return formatIso(new Date())
+}
+
+function buildDay(iso: string, current = todayIso()): AgendaDay {
   const date = parseIso(iso)
   const day = date.getDate()
   const month = monthLong[date.getMonth()]
@@ -174,9 +76,7 @@ function buildDay(iso: string): AgendaDay {
     day,
     iso,
     fullLabel: `${weekdayLong[date.getDay()]}, ${day} de ${month}`,
-    appointmentCount: 0,
-    nextFree: '09:00',
-    occupancy: '0%',
+    today: iso === current,
   }
 }
 
@@ -208,9 +108,8 @@ type AttendanceMark = 'confirmed' | 'available' | 'full' | 'done'
 
 function attendanceMark(slot: TimelineSlot): AttendanceMark {
   if (slot.variant === 'completed') return 'done'
-  if (slot.variant === 'featured') return slot.full ? 'full' : 'available'
-  if (slot.variant === 'client' && /lotado/i.test(slot.badge)) return 'full'
-  if (slot.variant === 'client' && /vaga/i.test(slot.badge)) return 'available'
+  if (/lotado/i.test(slot.badge)) return 'full'
+  if (/vaga/i.test(slot.badge)) return 'available'
   return 'confirmed'
 }
 
@@ -220,19 +119,6 @@ function badgeClass(mark: AttendanceMark) {
   return 'capacity-badge'
 }
 
-function createdSlot(created: CreatedAppointment): TimelineSlot {
-  return {
-    id: created.id,
-    time: created.time,
-    variant: 'created',
-    title: created.service,
-    place: created.room,
-    duration: serviceDurations[created.service] ?? '50 min',
-    client: created.client,
-    initials: initials(created.client),
-  }
-}
-
 function slotFromRecord(item: AppointmentRecord): TimelineSlot {
   const time = localClock(item.startsAt)
   if (item.status === 'completed') {
@@ -240,12 +126,14 @@ function slotFromRecord(item: AppointmentRecord): TimelineSlot {
   }
   const place = item.room?.name ?? item.unit.name
   const full = item.appointmentType === 'class' && item.occupancy >= item.capacity
+  const openSeats = Math.max(item.capacity - item.occupancy, 0)
   const badge = item.appointmentType === 'class'
-    ? (full ? `Lotado (${item.occupancy}/${item.capacity})` : `${Math.max(item.capacity - item.occupancy, 0)} vagas`)
+    ? (full ? `Lotado (${item.occupancy}/${item.capacity})` : `${openSeats} ${openSeats === 1 ? 'vaga' : 'vagas'}`)
     : 'Confirmado'
   const names = item.appointmentType === 'class'
-    ? item.participants.map((participant) => participant.client.fullName).filter(Boolean)
-    : [item.client?.fullName ?? 'Paciente']
+    ? item.participants.filter((participant) => participant.status !== 'cancelled').map((participant) => participant.client.fullName)
+    : [item.client?.fullName].filter((name): name is string => Boolean(name))
+  const waiting = item.waitlist.filter((entry) => entry.status === 'queued' || entry.status === 'offered').length
   return {
     id: item.id,
     time,
@@ -253,24 +141,17 @@ function slotFromRecord(item: AppointmentRecord): TimelineSlot {
     title: item.service.name,
     place: `${place} · ${item.service.durationMinutes} min`,
     badge,
-    client: names.join(', ') || 'Turma',
-    initials: initials(names[0] ?? 'Turma'),
-    note: item.appointmentType === 'class' ? 'turma' : 'confirmado',
+    client: names.join(', ') || 'Sem cliente vinculado',
+    initials: initials(names[0] ?? 'AG'),
+    note: waiting > 0 ? `${waiting} na fila` : item.professional.displayName,
   }
 }
 
-function slotsFor(day: AgendaDay, created: CreatedAppointment[], operational: AppointmentRecord[]) {
-  const base = schedules[day.iso] ?? [{ id: `${day.iso}-empty`, time: '09:00', variant: 'empty' as const }]
-  let slots: TimelineSlot[] = [...base]
-  for (const item of created.filter((entry) => entry.date === day.iso)) {
-    slots = slots.filter((slot) => !(slot.variant === 'empty' && slot.time === item.time))
-    slots.push(createdSlot(item))
-  }
-  for (const item of operational) {
-    if (item.status === 'cancelled' || localDay(item.startsAt) !== day.iso || slots.some((slot) => slot.id === item.id)) continue
-    slots.push(slotFromRecord(item))
-  }
-  return slots.sort((left, right) => left.time.localeCompare(right.time) || left.id.localeCompare(right.id))
+function slotsFor(day: AgendaDay, operational: AppointmentRecord[]) {
+  return operational
+    .filter((item) => item.status !== 'cancelled' && localDay(item.startsAt) === day.iso)
+    .map(slotFromRecord)
+    .sort((left, right) => left.time.localeCompare(right.time) || left.id.localeCompare(right.id))
 }
 
 interface AgendaPageProps {
@@ -278,26 +159,22 @@ interface AgendaPageProps {
 }
 
 export function AgendaPage({ openComposerRequest = 0 }: AgendaPageProps) {
-  const [weekMonday, setWeekMonday] = useState(demoWeekMonday)
-  const [selectedIso, setSelectedIso] = useState(demoToday)
-  const [waitlistNotified, setWaitlistNotified] = useState(false)
-  const [composerOpen, setComposerOpen] = useState(false)
-  const [createdAppointments, setCreatedAppointments] = useState<CreatedAppointment[]>([])
+  const { session } = useAuth()
+  const organization = session?.organizations.find((item) => item.id === session.organizationId)
+  const currentDay = todayIso()
+  const [weekMonday, setWeekMonday] = useState(() => mondayOf(currentDay))
+  const [selectedIso, setSelectedIso] = useState(currentDay)
+  const [composeRequest, setComposeRequest] = useState(openComposerRequest)
   const [operationalAppointments, setOperationalAppointments] = useState<AppointmentRecord[]>([])
   const weekDays = weekOf(weekMonday)
   const selectedDate = weekDays.find((date) => date.iso === selectedIso) ?? buildDay(selectedIso)
-  const days = weekDays.some((date) => date.iso === selectedDate.iso) ? weekDays : [...weekDays, selectedDate]
-  const visibleSlots = slotsFor(selectedDate, createdAppointments, operationalAppointments)
-  const latestCreated = createdAppointments[createdAppointments.length - 1] ?? null
-  const headingCount = schedules[selectedDate.iso]
-    ? selectedDate.appointmentCount
-    : visibleSlots.filter((slot) => slot.variant !== 'empty').length
+  const visibleSlots = slotsFor(selectedDate, operationalAppointments)
   const rememberAppointments = useCallback((items: AppointmentRecord[]) => {
     setOperationalAppointments(items)
   }, [])
 
   useEffect(() => {
-    if (openComposerRequest > 0) setComposerOpen(true)
+    if (openComposerRequest > 0) setComposeRequest(openComposerRequest)
   }, [openComposerRequest])
 
   function showDate(iso: string) {
@@ -314,20 +191,9 @@ export function AgendaPage({ openComposerRequest = 0 }: AgendaPageProps) {
     setSelectedIso(addDays(nextMonday, Math.min(Math.max(offset, 0), 4)))
   }
 
-  function createAppointment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const data = new FormData(event.currentTarget)
-    const next = {
-      id: `local-${createdAppointments.length + 1}-${String(data.get('date') ?? '')}-${String(data.get('time') ?? '')}`,
-      client: String(data.get('client') ?? '').trim(),
-      service: String(data.get('service') ?? ''),
-      date: String(data.get('date') ?? ''),
-      time: String(data.get('time') ?? ''),
-      room: String(data.get('room') ?? ''),
-    }
-    setCreatedAppointments((current) => [...current, next])
-    setComposerOpen(false)
-    showDate(next.date)
+  function openRealComposer() {
+    setComposeRequest((current) => current + 1)
+    document.getElementById('schedule-operations-title')?.scrollIntoView({ block: 'start' })
   }
 
   function renderSlot(slot: TimelineSlot): ReactNode {
@@ -340,86 +206,32 @@ export function AgendaPage({ openComposerRequest = 0 }: AgendaPageProps) {
       )
     }
 
-    if (slot.variant === 'featured') {
-      const mark = attendanceMark(slot)
-      return (
-        <article className={`appointment-card appointment-card--${mark} appointment-card--featured`}>
-          <header>
-            <div><h2><span className={`appointment-mark appointment-mark--${mark}`} aria-hidden="true" />{slot.title}</h2><p><Icon name="map-pin" /> {slot.place} · {slot.duration}</p></div>
-            <span className={badgeClass(mark)}>{slot.badge}</span>
-          </header>
-          <div className="attendee-row" aria-label="4 alunos confirmados">
-            {slot.attendees.map((letters, index) => (
-              <span key={letters} className={`demo-avatar demo-avatar--${['one', 'two', 'three'][index] ?? 'more'}`}>{letters}</span>
-            ))}
-            <span className="demo-avatar demo-avatar--more">+1</span>
-          </div>
-          {slot.waitlist > 0 && (waitlistNotified ? (
-            <SuccessState
-              compact
-              title="Notificação enviada aos interessados"
-              description="A equipe acompanhará as confirmações da fila."
-            />
-          ) : (
-            <div className="interest-banner">
-              <Icon name="bell" />
-              <div><strong>Aviso de interesse</strong><span>{slot.waitlist} alunos aguardam vaga</span></div>
-              <button type="button" onClick={() => setWaitlistNotified(true)}>
-                <Icon name="send" /> Notificar
-              </button>
-            </div>
-          ))}
-        </article>
-      )
-    }
-
-    if (slot.variant === 'client') {
-      const mark = attendanceMark(slot)
-      return (
-        <article className={`appointment-card appointment-card--${mark}`}>
-          <header>
-            <div><h2><span className={`appointment-mark appointment-mark--${mark}`} aria-hidden="true" />{slot.title}</h2><p><Icon name="map-pin" /> {slot.place}</p></div>
-            <span className={badgeClass(mark)}>{slot.badge}</span>
-          </header>
-          <div className="client-confirmation">
-            <span className="demo-avatar demo-avatar--four">{slot.initials}</span>
-            <span><strong>{slot.client}</strong> {slot.note}</span>
-          </div>
-        </article>
-      )
-    }
-
-    if (slot.variant === 'created') {
-      return (
-        <article className="appointment-card appointment-card--confirmed appointment-card--created" aria-live="polite">
-          <header>
-            <div><h2><span className="appointment-mark" aria-hidden="true" />{slot.title}</h2><p><Icon name="map-pin" /> {slot.place} · {slot.duration}</p></div>
-            <span className="capacity-badge">Confirmado</span>
-          </header>
-          <div className="client-confirmation">
-            <span className="demo-avatar demo-avatar--five">{slot.initials}</span>
-            <span><strong>{slot.client}</strong> · {slot.time}</span>
-          </div>
-        </article>
-      )
-    }
-
+    const mark = attendanceMark(slot)
     return (
-      <button className="empty-slot" type="button" onClick={() => setComposerOpen(true)}>
-        <span><Icon name="plus" /></span> Adicionar agendamento
-      </button>
+      <article className={`appointment-card appointment-card--${mark}`}>
+        <header>
+          <div><h2><span className={`appointment-mark appointment-mark--${mark}`} aria-hidden="true" />{slot.title}</h2><p><Icon name="map-pin" /> {slot.place}</p></div>
+          <span className={badgeClass(mark)}>{slot.badge}</span>
+        </header>
+        <div className="client-confirmation">
+          <span className="demo-avatar demo-avatar--four">{slot.initials}</span>
+          <span><strong>{slot.client}</strong> {slot.note}</span>
+        </div>
+      </article>
     )
   }
+
+  const headingCount = visibleSlots.length
 
   return (
     <section className="agenda-page" aria-labelledby="agenda-title">
       <header className="page-heading agenda-heading">
         <div>
-          <p className="page-heading__eyebrow">Clínica Serena · Centro</p>
+          <p className="page-heading__eyebrow">{organization?.name ?? 'Agenda'}</p>
           <h1 id="agenda-title">Agenda</h1>
           <p>{selectedDate.fullLabel} · {headingCount === 1 ? '1 atendimento' : `${headingCount} atendimentos`}</p>
         </div>
-        <button className="agenda-heading__action" type="button" onClick={() => setComposerOpen(true)}>
+        <button className="agenda-heading__action" type="button" onClick={openRealComposer}>
           <Icon name="plus" /> Novo agendamento
         </button>
       </header>
@@ -430,11 +242,11 @@ export function AgendaPage({ openComposerRequest = 0 }: AgendaPageProps) {
           <strong>{weekTitle(weekDays)}</strong>
           <button type="button" aria-label="Próxima semana" onClick={() => shiftWeek(1)}><Icon name="chevron-right" /></button>
         </div>
-        <button className="agenda-toolbar__today" type="button" onClick={() => showDate(demoToday)}>Hoje</button>
+        <button className="agenda-toolbar__today" type="button" onClick={() => showDate(currentDay)}>Hoje</button>
       </div>
 
       <div className="date-picker" aria-label="Selecionar dia">
-        {days.map((date) => {
+        {weekDays.map((date) => {
           const selected = selectedIso === date.iso
           return (
             <button
@@ -450,35 +262,20 @@ export function AgendaPage({ openComposerRequest = 0 }: AgendaPageProps) {
         })}
       </div>
 
-      {latestCreated && latestCreated.date === selectedDate.iso && (
-        <SuccessState
-          compact
-          title="Agendamento confirmado"
-          description={`${latestCreated.client} · ${latestCreated.service} às ${latestCreated.time} · ${latestCreated.room}`}
-        />
-      )}
-
       <div className="agenda-layout">
         <div className="agenda-timeline" aria-label={`Horários de ${selectedDate.fullLabel}`}>
-          {visibleSlots.map((slot, index) => {
-            const previous = visibleSlots[index - 1]
-            const showNow = Boolean(selectedDate.today) && slot.time >= '08:00' && (previous?.time ?? '00:00') < '08:00'
-            return (
-              <div key={slot.id}>
-                {showNow && <div className="current-time" aria-label="Horário atual: 7 horas e 50 minutos"><span /></div>}
-                <div className={`timeline-row${slot.variant === 'completed' ? ' timeline-row--completed' : ''}${slot.variant === 'featured' ? ' timeline-row--current' : ''}`}>
-                  <time>{slot.time}</time>
-                  {renderSlot(slot)}
-                </div>
-              </div>
-            )
-          })}
+          {visibleSlots.length === 0 ? (
+            <EmptyState title="Nenhum atendimento neste dia" description="Os horários cadastrados para esta data aparecem aqui." />
+          ) : visibleSlots.map((slot) => (
+            <div key={slot.id} className={`timeline-row${slot.variant === 'completed' ? ' timeline-row--completed' : ''}`}>
+              <time>{slot.time}</time>
+              {renderSlot(slot)}
+            </div>
+          ))}
         </div>
 
         <aside className="agenda-sidebar" aria-label="Resumo do dia">
           <article><span className="agenda-sidebar__icon"><Icon name="calendar" /></span><div><span>Atendimentos</span><strong>{headingCount} no dia</strong></div></article>
-          <article><span className="agenda-sidebar__icon"><Icon name="clock" /></span><div><span>Próximo horário livre</span><strong>{selectedDate.nextFree}</strong></div></article>
-          <article><span className="agenda-sidebar__icon"><Icon name="users" /></span><div><span>Ocupação do dia</span><strong>{selectedDate.occupancy}</strong></div></article>
           <div className="agenda-sidebar__legend">
             <h2>Legenda</h2>
             <span><i className="legend-dot legend-dot--confirmed" /> Confirmado</span>
@@ -493,26 +290,9 @@ export function AgendaPage({ openComposerRequest = 0 }: AgendaPageProps) {
         visibleFrom={weekDays[0].iso}
         visibleTo={weekDays[weekDays.length - 1].iso}
         preferredDate={selectedDate.iso}
+        composeRequest={composeRequest}
         onAppointments={rememberAppointments}
       />
-
-      {composerOpen && (
-        <div className="composer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setComposerOpen(false) }}>
-          <section className="appointment-composer" role="dialog" aria-modal="true" aria-labelledby="composer-title">
-            <header><div><span>Novo agendamento</span><h2 id="composer-title">Adicionar à agenda</h2></div><button type="button" aria-label="Fechar" onClick={() => setComposerOpen(false)}>×</button></header>
-            <form onSubmit={createAppointment}>
-              <label>Cliente<input name="client" defaultValue="Lucas Mendes" required /></label>
-              <label>Serviço<select name="service" defaultValue="Avaliação postural"><option>Avaliação postural</option><option>Fisioterapia</option><option>Pilates individual</option></select></label>
-              <div className="composer-fields">
-                <label>Data<input name="date" type="date" defaultValue={selectedDate.iso} required /></label>
-                <label>Horário<input name="time" type="time" defaultValue="10:00" required /></label>
-              </div>
-              <label>Local<select name="room" defaultValue="Consultório 2"><option>Consultório 2</option><option>Estúdio Principal</option><option>Estúdio Secundário</option></select></label>
-              <footer><button type="button" onClick={() => setComposerOpen(false)}>Cancelar</button><button type="submit">Confirmar agendamento</button></footer>
-            </form>
-          </section>
-        </div>
-      )}
     </section>
   )
 }

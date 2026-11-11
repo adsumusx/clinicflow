@@ -78,6 +78,7 @@ interface ScheduleOperationsProps {
   visibleFrom?: string
   visibleTo?: string
   preferredDate?: string
+  composeRequest?: number
   onAppointments?: (items: AppointmentRecord[]) => void
 }
 
@@ -85,6 +86,7 @@ export function ScheduleOperations({
   visibleFrom,
   visibleTo,
   preferredDate,
+  composeRequest = 0,
   onAppointments,
 }: ScheduleOperationsProps = {}) {
   const { session } = useAuth()
@@ -120,6 +122,14 @@ export function ScheduleOperations({
     } finally { setLoading(false) }
   }
   useEffect(() => { void load() }, [session?.organizationId, canRead, visibleFrom, visibleTo])
+  useEffect(() => {
+    if (!composeRequest || !canManage) return
+    setAppointment(null)
+    setAppointmentMode('individual')
+    setRuleEditor(false)
+    setRule(null)
+    setAppointmentEditor(true)
+  }, [composeRequest, canManage])
 
   async function saveAppointment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
