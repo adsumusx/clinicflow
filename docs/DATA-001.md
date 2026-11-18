@@ -286,7 +286,6 @@ erDiagram
         uuid modality_id FK
         string name "PUB"
         int duration_minutes "INT"
-        int default_capacity "INT"
         boolean active "INT"
     }
     ROOMS {
@@ -314,6 +313,7 @@ erDiagram
         string recurrence_expression "INT"
         timestamptz starts_at "INT"
         timestamptz ends_at "INT"
+        int client_limit "INT"
     }
     RECURRENCE_RULES {
         uuid id PK

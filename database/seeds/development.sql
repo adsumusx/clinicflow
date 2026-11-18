@@ -137,8 +137,8 @@ ON CONFLICT DO NOTHING;
 INSERT INTO modalities (id, organization_id, name) VALUES
   ('aaaaaaaa-6000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000001', 'Modalidade Sintética')
 ON CONFLICT DO NOTHING;
-INSERT INTO services (id, organization_id, modality_id, name, duration_minutes, default_capacity) VALUES
-  ('aaaaaaaa-6100-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-6000-4000-8000-000000000001', 'Aula Demonstrativa', 50, 4)
+INSERT INTO services (id, organization_id, modality_id, name, duration_minutes) VALUES
+  ('aaaaaaaa-6100-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-6000-4000-8000-000000000001', 'Aula Demonstrativa', 50)
 ON CONFLICT DO NOTHING;
 INSERT INTO rooms (id, organization_id, unit_id, name, capacity) VALUES
   ('aaaaaaaa-6200-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'Sala Sintética 01', 4)
@@ -148,14 +148,14 @@ INSERT INTO equipment (id, organization_id, unit_id, name, quantity) VALUES
 ON CONFLICT DO NOTHING;
 INSERT INTO availability_rules
   (id, organization_id, professional_id, unit_id, rule_type, kind, weekday,
-   local_start_time, local_end_time, timezone, label)
+   local_start_time, local_end_time, timezone, label, client_limit)
 VALUES
-  ('aaaaaaaa-6260-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 1, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de segunda'),
-  ('aaaaaaaa-6260-4000-8000-000000000002', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 2, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de terça'),
-  ('aaaaaaaa-6260-4000-8000-000000000003', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 3, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de quarta'),
-  ('aaaaaaaa-6260-4000-8000-000000000004', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 4, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de quinta'),
-  ('aaaaaaaa-6260-4000-8000-000000000005', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 5, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de sexta'),
-  ('aaaaaaaa-6260-4000-8000-000000000006', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'blocked', 'break', 2, '12:00', '13:00', 'America/Sao_Paulo', 'Intervalo de almoço')
+  ('aaaaaaaa-6260-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 1, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de segunda', 4),
+  ('aaaaaaaa-6260-4000-8000-000000000002', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 2, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de terça', 4),
+  ('aaaaaaaa-6260-4000-8000-000000000003', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 3, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de quarta', 4),
+  ('aaaaaaaa-6260-4000-8000-000000000004', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 4, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de quinta', 4),
+  ('aaaaaaaa-6260-4000-8000-000000000005', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'available', 'working_hours', 5, '07:00', '19:00', 'America/Sao_Paulo', 'Expediente de sexta', 4),
+  ('aaaaaaaa-6260-4000-8000-000000000006', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'blocked', 'break', 2, '12:00', '13:00', 'America/Sao_Paulo', 'Intervalo de almoço', NULL)
 ON CONFLICT DO NOTHING;
 INSERT INTO appointments (id, organization_id, unit_id, service_id, professional_id, room_id, starts_at, ends_at, capacity, appointment_type) VALUES
   ('aaaaaaaa-6300-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-1000-4000-8000-000000000001', 'aaaaaaaa-6100-4000-8000-000000000001', 'aaaaaaaa-4000-4000-8000-000000000001', 'aaaaaaaa-6200-4000-8000-000000000001', '2026-09-01 13:00:00-03', '2026-09-01 13:50:00-03', 4, 'class')

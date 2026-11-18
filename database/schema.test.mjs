@@ -904,7 +904,7 @@ describe('PostgreSQL schema', () => {
       actorUserId: ownerA, organizationId: organizationA, kind: 'services',
       resource: {
         name: 'Sessão Sintética', modalityId: modality.id,
-        durationMinutes: 45, defaultCapacity: 1, active: true,
+        durationMinutes: 45, active: true,
       },
     })
     expect(service).toMatchObject({
@@ -914,7 +914,7 @@ describe('PostgreSQL schema', () => {
       actorUserId: ownerA, organizationId: organizationA, kind: 'services', resourceId: service.id,
       resource: {
         name: service.name, modalityId: service.modalityId,
-        durationMinutes: service.durationMinutes, defaultCapacity: service.defaultCapacity, active: false,
+        durationMinutes: service.durationMinutes, active: false,
       },
     })
     expect(inactive.active).toBe(false)
@@ -1090,6 +1090,15 @@ describe('PostgreSQL schema', () => {
     })
     expect(created).toMatchObject({ appointmentType: 'class', capacity: 2, occupancy: 1 })
 
+    await expect(repository.createClassAppointment({
+      actorUserId: ownerA, organizationId,
+      appointment: {
+        professionalId, unitId, serviceId, roomId: null,
+        startsAt: new Date('2026-10-06T15:00:00-03:00'), capacity: 5,
+        clientIds: [],
+      },
+    })).rejects.toMatchObject({ code: '23514' })
+
     const full = await repository.addAppointmentParticipant({
       actorUserId: ownerA, organizationId, appointmentId: created.id, clientId: clients[1],
     })
@@ -1106,6 +1115,10 @@ describe('PostgreSQL schema', () => {
       actorUserId: ownerA, organizationId, appointmentId: created.id, clientId: clients[2],
     })
     expect(filledAgain).toMatchObject({ occupancy: 2, capacity: 2 })
+    await expect(db.query(
+      `UPDATE availability_rules SET client_limit = 1
+       WHERE id = 'aaaaaaaa-6260-4000-8000-000000000002'`,
+    )).rejects.toThrow(/client limit/i)
   })
 
   it('preserva a ordem da fila e oferece uma vaga por vez, avançando após expiração', async () => {
@@ -1285,9 +1298,9 @@ describe('PostgreSQL schema', () => {
     await db.query(
       `INSERT INTO availability_rules
         (organization_id, professional_id, unit_id, rule_type, kind, weekday,
-         local_start_time, local_end_time, timezone, label)
+         local_start_time, local_end_time, timezone, label, client_limit)
        VALUES ($1, $2, $3, 'available', 'working_hours', 1,
-               '08:00', '18:00', 'America/Sao_Paulo', 'Expediente sintético confirmação')`,
+               '08:00', '18:00', 'America/Sao_Paulo', 'Expediente sintético confirmação', 1)`,
       [organizationId, otherProfessionalId, 'aaaaaaaa-1000-4000-8000-000000000001'],
     )
     const conflicting = await repository.createAppointment({
@@ -1702,9 +1715,9 @@ describe('PostgreSQL schema', () => {
     await db.query(
       `INSERT INTO availability_rules
         (organization_id, professional_id, unit_id, rule_type, kind, weekday,
-         local_start_time, local_end_time, timezone, label)
+         local_start_time, local_end_time, timezone, label, client_limit)
        VALUES ($1, $2, $3, 'available', 'working_hours', 3,
-               '07:00', '19:00', 'America/Sao_Paulo', 'Expediente recursos')`,
+               '07:00', '19:00', 'America/Sao_Paulo', 'Expediente recursos', 1)`,
       [organizationId, otherProfessionalId, unitId],
     )
 

@@ -261,9 +261,9 @@ describe.skipIf(!sourceDatabaseUrl || !scheduleQaRequested)(
     await pool.query(
       `INSERT INTO availability_rules
         (organization_id, professional_id, unit_id, rule_type, kind, weekday,
-         local_start_time, local_end_time, timezone, label)
+         local_start_time, local_end_time, timezone, label, client_limit)
        VALUES ($1, $2, $3, 'available', 'working_hours', 7,
-               '08:00', '12:00', $4, 'Expediente QA-002 DST')`,
+               '08:00', '12:00', $4, 'Expediente QA-002 DST', 1)`,
       [organizationId, professionalId, unitId, timezone],
     )
 

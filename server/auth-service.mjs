@@ -566,12 +566,10 @@ function normalizeResourceInput(kind, input) {
       throw new ServiceError(400, 'INVALID_RESOURCE_REFERENCE', 'Escolha uma modalidade válida.')
     }
     const durationMinutes = Number(input.durationMinutes)
-    const defaultCapacity = Number(input.defaultCapacity)
-    if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440
-      || !Number.isInteger(defaultCapacity) || defaultCapacity < 1 || defaultCapacity > 10000) {
-      throw new ServiceError(400, 'INVALID_RESOURCE', 'Duração ou capacidade do serviço inválida.')
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440) {
+      throw new ServiceError(400, 'INVALID_RESOURCE', 'Duração do serviço inválida.')
     }
-    return { ...normalized, modalityId: input.modalityId, durationMinutes, defaultCapacity }
+    return { ...normalized, modalityId: input.modalityId, durationMinutes }
   }
   if (kind === 'rooms' || kind === 'equipment') {
     if (!uuidPattern.test(input.unitId ?? '')) {
@@ -633,6 +631,11 @@ function normalizeAvailabilityInput(input) {
   if (typeof active !== 'boolean') {
     throw new ServiceError(400, 'INVALID_AVAILABILITY', 'A situação da regra é inválida.')
   }
+  const clientLimit = input.kind === 'working_hours' ? Number(input.clientLimit) : null
+  if (input.kind === 'working_hours'
+    && (!Number.isInteger(clientLimit) || clientLimit < 1 || clientLimit > 10000)) {
+    throw new ServiceError(400, 'INVALID_AVAILABILITY', 'Informe um limite de clientes entre 1 e 10000.')
+  }
 
   if (input.kind === 'working_hours' || input.kind === 'break') {
     const weekday = Number(input.weekday)
@@ -643,7 +646,7 @@ function normalizeAvailabilityInput(input) {
       throw new ServiceError(400, 'INVALID_AVAILABILITY', 'Informe dia e intervalo semanal válidos.')
     }
     return {
-      kind: input.kind, professionalId, unitId, timezone, label, active,
+      kind: input.kind, professionalId, unitId, timezone, label, active, clientLimit,
       weekday, localStartTime, localEndTime, startsAt: null, endsAt: null,
     }
   }
@@ -658,7 +661,7 @@ function normalizeAvailabilityInput(input) {
     throw new ServiceError(400, 'INVALID_AVAILABILITY', 'O fim da indisponibilidade deve ser posterior ao início.')
   }
   return {
-    kind: input.kind, professionalId, unitId, timezone, label, active,
+    kind: input.kind, professionalId, unitId, timezone, label, active, clientLimit,
     weekday: null, localStartTime: null, localEndTime: null, startsAt, endsAt,
   }
 }
@@ -2767,6 +2770,12 @@ export class AuthService {
     }
     if (error?.code === '23514' && String(error.message).includes('attendance before')) {
       return new ServiceError(409, 'ATTENDANCE_TOO_EARLY', 'Presença ou falta só pode ser registrada após o início do atendimento.')
+    }
+    if (error?.code === '23514' && String(error.message).includes('professional client capacity')) {
+      return new ServiceError(409, 'PROFESSIONAL_CLIENT_LIMIT', 'A turma excede o limite de clientes do expediente deste profissional.')
+    }
+    if (error?.code === '23514' && String(error.message).includes('availability client limit')) {
+      return new ServiceError(409, 'AVAILABILITY_CONFLICT', 'O limite de clientes do expediente não pode ficar abaixo das turmas já agendadas.')
     }
     if (error?.code === '23514' && String(error.message).includes('capacity')) {
       return new ServiceError(409, 'CAPACITY_EXCEEDED', 'A turma atingiu a capacidade disponível.')

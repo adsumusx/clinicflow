@@ -652,14 +652,14 @@ describe('AuthService', () => {
     await service.createResource('session-token', 'org-a', 'services', {
       name: '  Pilates   individual ',
       modalityId: 'aaaaaaaa-6000-4000-8000-000000000001',
-      durationMinutes: '50', defaultCapacity: '1', active: true,
+      durationMinutes: '50', active: true,
     })
     expect(repo.createResource).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'services',
       resource: {
         name: 'Pilates individual', active: true,
         modalityId: 'aaaaaaaa-6000-4000-8000-000000000001',
-        durationMinutes: 50, defaultCapacity: 1,
+        durationMinutes: 50,
       },
     }))
     await service.updateResource(
@@ -728,6 +728,19 @@ describe('AuthService', () => {
       startsAt: '2026-09-10T10:00:00-03:00', endsAt: '2026-09-09T10:00:00-03:00',
       timezone: 'America/Sao_Paulo',
     })).rejects.toMatchObject({ status: 400, code: 'INVALID_AVAILABILITY' })
+    await expect(service.createAvailability('session-token', 'org-a', {
+      professionalId, unitId, kind: 'working_hours', weekday: 1,
+      localStartTime: '08:00', localEndTime: '12:00',
+      timezone: 'America/Sao_Paulo', clientLimit: 0,
+    })).rejects.toMatchObject({ status: 400, code: 'INVALID_AVAILABILITY' })
+    await service.createAvailability('session-token', 'org-a', {
+      professionalId, unitId, kind: 'working_hours', weekday: 1,
+      localStartTime: '08:00', localEndTime: '12:00',
+      timezone: 'America/Sao_Paulo', clientLimit: '6',
+    })
+    expect(repo.createAvailability).toHaveBeenCalledWith(expect.objectContaining({
+      availability: expect.objectContaining({ kind: 'working_hours', clientLimit: 6 }),
+    }))
   })
 
   it('traduz conflitos da agenda sem expor erro do banco', async () => {

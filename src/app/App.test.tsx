@@ -103,7 +103,7 @@ describe('App', () => {
       id: 'rule-1', active: true, endsAt: null, kind: 'working_hours', label: 'Manhã',
       localEndTime: '12:00:00', localStartTime: '08:00:00', professionalId: 'pro-1',
       professionalName: 'Carla', startsAt: null, timezone: 'America/Sao_Paulo',
-      unitId: 'unit-1', unitName: 'Centro', weekday: 2,
+      unitId: 'unit-1', unitName: 'Centro', weekday: 2, clientLimit: 4,
     }
     const schedule = {
       appointments: [],
@@ -180,14 +180,14 @@ describe('App', () => {
     expect(JSON.parse(createRequest?.body ?? '{}')).toEqual({
       active: true, kind: 'working_hours', label: null, professionalId: 'pro-1', unitId: 'unit-1',
       timezone: 'America/Sao_Paulo', weekday: 3, localStartTime: '09:30', localEndTime: '12:00',
-      startsAt: null, endsAt: null,
+      startsAt: null, endsAt: null, clientLimit: 1,
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Inativar' }))
     await waitFor(() => expect(screen.getByText('Regra inativada com sucesso.')).toBeInTheDocument())
     const updateRequest = requests.find(({ url, method }) => url.includes('/availability-rules/rule-1') && method === 'PUT')
     expect(JSON.parse(updateRequest?.body ?? '{}')).toMatchObject({
-      active: false, localStartTime: '08:00', localEndTime: '12:00', weekday: 2,
+      active: false, localStartTime: '08:00', localEndTime: '12:00', weekday: 2, clientLimit: 4,
     })
   })
 

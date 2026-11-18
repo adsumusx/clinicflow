@@ -396,7 +396,6 @@ function mapResourceRow(kind, row) {
     modalityId: row.modality_id,
     modalityName: row.modality_name,
     durationMinutes: row.duration_minutes,
-    defaultCapacity: row.default_capacity,
   }
   if (kind === 'rooms') return {
     ...common,
@@ -466,6 +465,7 @@ function mapAvailability(row) {
     endsAt: row.ends_at,
     timezone: row.timezone,
     label: row.label,
+    clientLimit: row.client_limit,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -5757,10 +5757,9 @@ export class PostgresAuthRepository {
       )
       if (kind === 'services') result = await client.query(
         `INSERT INTO services
-          (organization_id, modality_id, name, duration_minutes, default_capacity, active)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [organizationId, resource.modalityId, resource.name, resource.durationMinutes,
-          resource.defaultCapacity, resource.active],
+          (organization_id, modality_id, name, duration_minutes, active)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [organizationId, resource.modalityId, resource.name, resource.durationMinutes, resource.active],
       )
       if (kind === 'rooms') result = await client.query(
         `INSERT INTO rooms (organization_id, unit_id, name, capacity, active)
@@ -5802,10 +5801,10 @@ export class PostgresAuthRepository {
         [organizationId, resourceId, resource.name, resource.active],
       )
       if (kind === 'services') await client.query(
-        `UPDATE services SET modality_id = $3, name = $4, duration_minutes = $5,
-           default_capacity = $6, active = $7 WHERE organization_id = $1 AND id = $2`,
+        `UPDATE services SET modality_id = $3, name = $4, duration_minutes = $5, active = $6
+         WHERE organization_id = $1 AND id = $2`,
         [organizationId, resourceId, resource.modalityId, resource.name,
-          resource.durationMinutes, resource.defaultCapacity, resource.active],
+          resource.durationMinutes, resource.active],
       )
       if (kind === 'rooms') await client.query(
         `UPDATE rooms SET unit_id = $3, name = $4, capacity = $5, active = $6
@@ -5878,15 +5877,15 @@ export class PostgresAuthRepository {
       const inserted = await client.query(
         `INSERT INTO availability_rules
           (organization_id, professional_id, unit_id, rule_type, kind, weekday,
-           local_start_time, local_end_time, starts_at, ends_at, timezone, label, active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           local_start_time, local_end_time, starts_at, ends_at, timezone, label, active, client_limit)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          RETURNING id`,
         [
           organizationId, availability.professionalId, availability.unitId,
           availability.kind === 'working_hours' ? 'available' : 'blocked', availability.kind,
           availability.weekday, availability.localStartTime, availability.localEndTime,
           availability.startsAt, availability.endsAt, availability.timezone,
-          availability.label, availability.active,
+          availability.label, availability.active, availability.clientLimit,
         ],
       )
       await ensureAvailabilityKeepsAppointmentsValid(
@@ -5929,14 +5928,15 @@ export class PostgresAuthRepository {
         `UPDATE availability_rules
          SET professional_id = $3, unit_id = $4, rule_type = $5, kind = $6,
              weekday = $7, local_start_time = $8, local_end_time = $9,
-             starts_at = $10, ends_at = $11, timezone = $12, label = $13, active = $14
+             starts_at = $10, ends_at = $11, timezone = $12, label = $13, active = $14,
+             client_limit = $15
          WHERE organization_id = $1 AND id = $2`,
         [
           organizationId, availabilityId, availability.professionalId, availability.unitId,
           availability.kind === 'working_hours' ? 'available' : 'blocked', availability.kind,
           availability.weekday, availability.localStartTime, availability.localEndTime,
           availability.startsAt, availability.endsAt, availability.timezone,
-          availability.label, availability.active,
+          availability.label, availability.active, availability.clientLimit,
         ],
       )
       await ensureAvailabilityKeepsAppointmentsValid(
@@ -6489,7 +6489,7 @@ export class PostgresAuthRepository {
       ),
       client.query('SELECT id, name, timezone FROM units WHERE organization_id = $1 AND active ORDER BY name, id', [organizationId]),
       client.query(
-        `SELECT service.id, service.name, service.duration_minutes, service.default_capacity
+        `SELECT service.id, service.name, service.duration_minutes
          FROM services service JOIN modalities modality
            ON modality.organization_id = service.organization_id AND modality.id = service.modality_id
          WHERE service.organization_id = $1 AND service.active AND modality.active ORDER BY service.name, service.id`,
@@ -6515,7 +6515,6 @@ export class PostgresAuthRepository {
       units: units.rows,
       services: services.rows.map((row) => ({
         id: row.id, name: row.name, durationMinutes: row.duration_minutes,
-        defaultCapacity: row.default_capacity,
       })),
       rooms: rooms.rows,
       equipment: equipment.rows,

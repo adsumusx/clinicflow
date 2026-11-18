@@ -478,7 +478,7 @@ describe('rotas HTTP de recursos', () => {
     )
 
     const createResponse = makeResponse()
-    const input = { name: 'Pilates', modalityId: 'modality-a', durationMinutes: 50, defaultCapacity: 1 }
+    const input = { name: 'Pilates', modalityId: 'modality-a', durationMinutes: 50 }
     await createHttpHandler(service)(makeRequest({
       method: 'POST', url: `${organizationPath}/services`, body: input,
       headers: { origin: 'http://clinicflow.test', cookie: 'clinicflow_session=session-token' },

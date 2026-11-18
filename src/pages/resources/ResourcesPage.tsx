@@ -34,7 +34,6 @@ function inputFromForm(kind: ResourceKind, form: HTMLFormElement): ResourceInput
     ...common,
     modalityId: String(data.get('modalityId') ?? ''),
     durationMinutes: Number(data.get('durationMinutes')),
-    defaultCapacity: Number(data.get('defaultCapacity')),
   }
   if (kind === 'rooms') return {
     ...common, unitId: String(data.get('unitId') ?? ''), capacity: Number(data.get('capacity')),
@@ -49,7 +48,7 @@ function inputFromResource(kind: ResourceKind, resource: ResourceRecord, active:
   const common = { name: resource.name, active }
   if (kind === 'services') {
     const service = resource as ServiceResource
-    return { ...common, modalityId: service.modalityId, durationMinutes: service.durationMinutes, defaultCapacity: service.defaultCapacity }
+    return { ...common, modalityId: service.modalityId, durationMinutes: service.durationMinutes }
   }
   if (kind === 'rooms') {
     const room = resource as RoomResource
@@ -65,7 +64,7 @@ function inputFromResource(kind: ResourceKind, resource: ResourceRecord, active:
 function detail(kind: ResourceKind, resource: ResourceRecord) {
   if (kind === 'services') {
     const service = resource as ServiceResource
-    return `${service.modalityName} · ${service.durationMinutes} min · capacidade ${service.defaultCapacity}`
+    return `${service.modalityName} · ${service.durationMinutes} min`
   }
   if (kind === 'rooms') {
     const room = resource as RoomResource
@@ -197,7 +196,6 @@ export function ResourcesPage() {
             {kind === 'services' && <>
               <label>Modalidade<select name="modalityId" required defaultValue={serviceEditing?.modalityId ?? ''}><option value="" disabled>Selecione</option>{catalog.modalities.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? '' : ' (inativa)'}</option>)}</select></label>
               <label>Duração em minutos<input name="durationMinutes" type="number" required min={5} max={1440} defaultValue={serviceEditing?.durationMinutes ?? 50} /></label>
-              <label>Capacidade padrão<input name="defaultCapacity" type="number" required min={1} max={10000} defaultValue={serviceEditing?.defaultCapacity ?? 1} /></label>
             </>}
             {(kind === 'rooms' || kind === 'equipment') && <label>Unidade<select name="unitId" required defaultValue={(kind === 'rooms' ? roomEditing?.unitId : equipmentEditing?.unitId) ?? ''}><option value="" disabled>Selecione</option>{catalog.units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}{unit.active ? '' : ' (inativa)'}</option>)}</select></label>}
             {kind === 'rooms' && <label>Capacidade<input name="capacity" type="number" required min={1} max={10000} defaultValue={roomEditing?.capacity ?? 1} /></label>}

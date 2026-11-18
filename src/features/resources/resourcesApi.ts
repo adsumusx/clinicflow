@@ -21,7 +21,6 @@ export interface BaseResource {
 export interface ModalityResource extends BaseResource {}
 
 export interface ServiceResource extends BaseResource {
-  defaultCapacity: number
   durationMinutes: number
   modalityId: string
   modalityName: string
@@ -51,7 +50,6 @@ export type ResourceRecord = ModalityResource | ServiceResource | RoomResource |
 export type ResourceInput = {
   active: boolean
   capacity?: number
-  defaultCapacity?: number
   durationMinutes?: number
   modalityId?: string
   name: string

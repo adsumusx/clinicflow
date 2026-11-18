@@ -10,7 +10,6 @@ export interface ScheduleOption {
   unitId?: string
   timezone?: string
   durationMinutes?: number
-  defaultCapacity?: number
   quantity?: number
   clientType?: 'fixed' | 'rotating'
 }
@@ -21,6 +20,7 @@ export interface AvailabilityRule {
   id: string
   kind: AvailabilityKind
   label: string | null
+  clientLimit: number | null
   localEndTime: string | null
   localStartTime: string | null
   professionalId: string
