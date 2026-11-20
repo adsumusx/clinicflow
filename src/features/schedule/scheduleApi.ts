@@ -218,3 +218,45 @@ export function updateAvailability(
     method: 'PUT', body: JSON.stringify(input),
   })
 }
+
+export interface ScheduleGridRecord {
+  id: string
+  name: string
+  weekday: number
+  localStartTime: string
+  durationMinutes: number
+  capacity: number
+  occurrenceCount: number
+  professionalId: string
+  professionalName: string
+  unitId: string
+  unitName: string
+  serviceId: string
+  serviceName: string
+  services: Array<{ id: string; name: string }>
+  active: boolean
+}
+
+export interface ScheduleGridInput {
+  name: string
+  professionalId: string
+  unitId: string
+  serviceIds: string[]
+  weekday: number
+  localStartTime: string
+  durationMinutes: number
+  capacity: number
+  occurrenceCount: number
+  startsOn: string
+  timezone: string
+}
+
+export function listScheduleGrids(organizationId: string) {
+  return apiRequest<ScheduleGridRecord[]>(`${base(organizationId)}/schedule-grids`)
+}
+
+export function createScheduleGrid(organizationId: string, input: ScheduleGridInput) {
+  return apiRequest<{ id: string; appointmentsCreated: number }>(`${base(organizationId)}/schedule-grids`, {
+    method: 'POST', body: JSON.stringify(input),
+  })
+}

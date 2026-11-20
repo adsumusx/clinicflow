@@ -13,6 +13,14 @@ interface AgendaDay {
   today?: boolean
 }
 
+type ClassDetails = {
+  professional: string
+  durationMinutes: number
+  capacity: number
+  reserved: number
+  available: number
+}
+
 type TimelineSlot =
   | { id: string; time: string; variant: 'completed'; title: string }
   | {
@@ -25,6 +33,7 @@ type TimelineSlot =
       client: string
       initials: string
       note: string
+      classDetails?: ClassDetails
     }
 
 const weekdayShort = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
@@ -125,6 +134,7 @@ function slotFromRecord(item: AppointmentRecord): TimelineSlot {
     return { id: item.id, time, variant: 'completed', title: item.service.name }
   }
   const place = item.room?.name ?? item.unit.name
+  const durationMinutes = Math.max(1, Math.round((new Date(item.endsAt).getTime() - new Date(item.startsAt).getTime()) / 60_000))
   const full = item.appointmentType === 'class' && item.occupancy >= item.capacity
   const openSeats = Math.max(item.capacity - item.occupancy, 0)
   const badge = item.appointmentType === 'class'
@@ -134,16 +144,24 @@ function slotFromRecord(item: AppointmentRecord): TimelineSlot {
     ? item.participants.filter((participant) => participant.status !== 'cancelled').map((participant) => participant.client.fullName)
     : [item.client?.fullName].filter((name): name is string => Boolean(name))
   const waiting = item.waitlist.filter((entry) => entry.status === 'queued' || entry.status === 'offered').length
+  const isClass = item.appointmentType === 'class'
   return {
     id: item.id,
     time,
     variant: 'client',
     title: item.service.name,
-    place: `${place} · ${item.service.durationMinutes} min`,
+    place: `${place} · ${durationMinutes} min`,
     badge,
-    client: names.join(', ') || 'Sem cliente vinculado',
-    initials: initials(names[0] ?? 'AG'),
+    client: names.join(', ') || (isClass ? 'Nenhum paciente reservado' : 'Sem cliente vinculado'),
+    initials: initials(names[0] ?? item.professional.displayName),
     note: waiting > 0 ? `${waiting} na fila` : item.professional.displayName,
+    classDetails: isClass ? {
+      professional: item.professional.displayName,
+      durationMinutes,
+      capacity: item.capacity,
+      reserved: item.occupancy,
+      available: openSeats,
+    } : undefined,
   }
 }
 
@@ -217,6 +235,15 @@ export function AgendaPage({ openComposerRequest = 0 }: AgendaPageProps) {
           <span className="demo-avatar demo-avatar--four">{slot.initials}</span>
           <span><strong>{slot.client}</strong> {slot.note}</span>
         </div>
+        {slot.classDetails && (
+          <dl className="class-occupancy">
+            <div><dt>Profissional</dt><dd>{slot.classDetails.professional}</dd></div>
+            <div><dt>Duração</dt><dd>{slot.classDetails.durationMinutes} minutos</dd></div>
+            <div><dt>Capacidade</dt><dd>{slot.classDetails.capacity} pacientes</dd></div>
+            <div><dt>Reservados</dt><dd>{slot.classDetails.reserved}</dd></div>
+            <div><dt>Disponíveis</dt><dd>{slot.classDetails.available}</dd></div>
+          </dl>
+        )}
       </article>
     )
   }

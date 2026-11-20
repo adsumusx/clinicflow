@@ -193,4 +193,10 @@
   .composer-fields { grid-template-columns: 1fr; }
   .appointment-composer form { padding: var(--space-5); }
   .appointment-composer footer { margin-right: calc(var(--space-5) * -1); margin-bottom: calc(var(--space-5) * -1); margin-left: calc(var(--space-5) * -1); padding-inline: var(--space-5); }
+  .class-occupancy { grid-template-columns: 1fr; }
 }
+
+.class-occupancy { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
+.class-occupancy div { display: grid; gap: 0.125rem; }
+.class-occupancy dt { color: var(--color-on-surface-variant); font-size: var(--font-size-label-md); }
+.class-occupancy dd { margin: 0; font-weight: var(--font-weight-label-md); }

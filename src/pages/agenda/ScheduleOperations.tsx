@@ -2,10 +2,10 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError, useAuth } from '@/features/auth'
 import {
   addAppointmentParticipant, cancelAppointment, createAppointment,
-  createAppointmentSeries, createAvailability, createClassAppointment, getSchedule, listAvailability,
-  updateAppointment, updateAppointmentOccurrences, updateAppointmentParticipantStatus, updateAvailability,
+  createAppointmentSeries, createAvailability, createClassAppointment, createScheduleGrid, getSchedule, listAvailability,
+  listScheduleGrids, updateAppointment, updateAppointmentOccurrences, updateAppointmentParticipantStatus, updateAvailability,
   type AppointmentRecord, type AvailabilityKind,
-  type AvailabilityPayload, type AvailabilityRule, type SchedulePayload,
+  type AvailabilityPayload, type AvailabilityRule, type ScheduleGridRecord, type SchedulePayload,
 } from '@/features/schedule'
 import { Button, Card, EmptyState, ErrorState, LoadingState, StatusBadge } from '@/shared/ui'
 
@@ -102,6 +102,10 @@ export function ScheduleOperations({
   const [appointment, setAppointment] = useState<AppointmentRecord | null>(null)
   const [rule, setRule] = useState<AvailabilityRule | null>(null)
   const [ruleKind, setRuleKind] = useState<AvailabilityKind>('working_hours')
+  const [includeParticipants, setIncludeParticipants] = useState(false)
+  const [extraPeriods, setExtraPeriods] = useState<Array<{ start: string; end: string }>>([])
+  const [gridEditor, setGridEditor] = useState(false)
+  const [grids, setGrids] = useState<ScheduleGridRecord[]>([])
   const organization = session?.organizations.find(({ id }) => id === session.organizationId)
   const canRead = organization?.permissions.includes('schedule.read') ?? false
   const canManage = organization?.permissions.includes('schedule.manage') ?? false
@@ -117,6 +121,12 @@ export function ScheduleOperations({
       if (Array.isArray(nextSchedule.appointments) && Array.isArray(nextAvailability.rules)) {
         setSchedule(nextSchedule); setAvailability(nextAvailability)
         onAppointments?.(nextSchedule.appointments)
+        try {
+          const listed = await listScheduleGrids(session.organizationId)
+          setGrids(Array.isArray(listed) ? listed : [])
+        } catch {
+          setGrids([])
+        }
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar a agenda operacional.')
@@ -160,7 +170,7 @@ export function ScheduleOperations({
       } else if (appointmentMode === 'class') {
         await createClassAppointment(session.organizationId, {
           ...baseInput, capacity: Number(data.get('capacity')),
-          clientIds: data.getAll('clientIds').map(String),
+          clientIds: includeParticipants ? data.getAll('clientIds').map(String).filter(Boolean) : [],
         })
       } else if (appointmentMode === 'series') {
         await createAppointmentSeries(session.organizationId, {
@@ -235,9 +245,22 @@ export function ScheduleOperations({
     setError(null)
     try {
       if (rule) await updateAvailability(session.organizationId, rule.id, input)
-      else await createAvailability(session.organizationId, input)
+      else if (weekly && kind === 'working_hours') {
+        const periods = [
+          { start: input.localStartTime, end: input.localEndTime },
+          ...extraPeriods.map((period) => ({ start: clock(period.start), end: clock(period.end) })),
+        ]
+        for (const period of periods) {
+          await createAvailability(session.organizationId, {
+            ...input,
+            localStartTime: period.start,
+            localEndTime: period.end,
+            label: periods.length > 1 ? `${input.label ?? 'Expediente'} ${period.start}–${period.end}` : input.label,
+          })
+        }
+      } else await createAvailability(session.organizationId, input)
       setMessage(rule ? 'Disponibilidade alterada com sucesso.' : 'Disponibilidade cadastrada com sucesso.')
-      setRuleEditor(false); setRule(null); await load()
+      setRuleEditor(false); setRule(null); setExtraPeriods([]); await load()
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Não foi possível salvar a regra.') }
   }
 
@@ -252,10 +275,40 @@ export function ScheduleOperations({
 
   const creatingAppointment = appointmentEditor && !appointment
   const creatingRule = ruleEditor && !rule
+  async function saveGrid(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!session?.organizationId) return
+    const data = new FormData(event.currentTarget)
+    const serviceIds = data.getAll('serviceIds').map(String).filter(Boolean)
+    setError(null)
+    try {
+      const created = await createScheduleGrid(session.organizationId, {
+        name: String(data.get('name') ?? ''),
+        professionalId: String(data.get('professionalId')),
+        unitId: String(data.get('unitId')),
+        serviceIds,
+        weekday: Number(data.get('weekday')),
+        localStartTime: clock(String(data.get('localStartTime') ?? '')) ?? '',
+        durationMinutes: Number(data.get('durationMinutes')),
+        capacity: Number(data.get('capacity')),
+        occurrenceCount: Number(data.get('occurrenceCount')),
+        startsOn: String(data.get('startsOn')),
+        timezone: 'America/Sao_Paulo',
+      })
+      setMessage(`Grade criada. ${created.appointmentsCreated} turmas vazias foram disponibilizadas na agenda.`)
+      setGridEditor(false)
+      await load(String(data.get('startsOn') ?? ''))
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível criar a grade.')
+    }
+  }
+
   function selectAppointmentMode(mode: 'individual' | 'class' | 'series') {
     setError(null)
     setRuleEditor(false)
     setRule(null)
+    setGridEditor(false)
+    setIncludeParticipants(false)
     if (creatingAppointment && appointmentMode === mode) {
       setAppointmentEditor(false)
       return
@@ -264,10 +317,20 @@ export function ScheduleOperations({
     setAppointmentMode(mode)
     setAppointmentEditor(true)
   }
+  function selectGrid() {
+    setError(null)
+    setAppointmentEditor(false)
+    setAppointment(null)
+    setRuleEditor(false)
+    setRule(null)
+    setGridEditor((open) => !open)
+  }
   function selectAvailability() {
     setError(null)
     setAppointmentEditor(false)
     setAppointment(null)
+    setGridEditor(false)
+    setExtraPeriods([])
     if (creatingRule) {
       setRuleEditor(false)
       return
@@ -286,23 +349,39 @@ export function ScheduleOperations({
     ? schedule.clients.filter(({ clientType }) => clientType === 'fixed') : schedule.clients
 
   return <section className="schedule-operations" aria-labelledby="schedule-operations-title">
-    <header><div><span>Dados em tempo real</span><h2 id="schedule-operations-title">Agenda operacional</h2><p>A semana aberta e os 90 dias seguintes, com disponibilidade e conflitos validados no servidor.</p></div>{canManage && <div><Button type="button" variant="secondary" aria-pressed={creatingAppointment && appointmentMode === 'individual'} onClick={() => selectAppointmentMode('individual')}>Novo individual</Button><Button type="button" variant="secondary" aria-pressed={creatingAppointment && appointmentMode === 'class'} onClick={() => selectAppointmentMode('class')}>Nova turma</Button><Button type="button" variant="secondary" aria-pressed={creatingAppointment && appointmentMode === 'series'} onClick={() => selectAppointmentMode('series')}>Nova série</Button><Button type="button" variant="secondary" aria-pressed={creatingRule} onClick={selectAvailability}>Disponibilidade</Button></div>}</header>
+    <header><div><span>Dados em tempo real</span><h2 id="schedule-operations-title">Agenda operacional</h2><p>A semana aberta e os 90 dias seguintes, com disponibilidade e conflitos validados no servidor.</p></div>{canManage && <div><Button type="button" variant="secondary" aria-pressed={creatingAppointment && appointmentMode === 'individual'} onClick={() => selectAppointmentMode('individual')}>Novo individual</Button><Button type="button" variant="secondary" aria-pressed={creatingAppointment && appointmentMode === 'class'} onClick={() => selectAppointmentMode('class')}>Nova turma</Button><Button type="button" variant="secondary" aria-pressed={creatingAppointment && appointmentMode === 'series'} onClick={() => selectAppointmentMode('series')}>Nova série</Button><Button type="button" variant="secondary" aria-pressed={gridEditor} onClick={selectGrid}>Nova grade</Button><Button type="button" variant="secondary" aria-pressed={creatingRule} onClick={selectAvailability}>Disponibilidade</Button></div>}</header>
     {message && <p className="schedule-operations__message" role="status">{message}</p>}
     {error && <ErrorState compact title="Não foi possível concluir" description={error} />}
 
-    {appointmentEditor && <Card title={appointment ? 'Alterar agendamento' : appointmentMode === 'class' ? 'Nova turma' : appointmentMode === 'series' ? 'Nova série semanal' : 'Novo agendamento individual'} description="O término é calculado pela duração do serviço."><form key={`${appointment?.id ?? 'new'}-${appointmentMode}`} className="schedule-form" onSubmit={saveAppointment}>
-      {appointmentMode === 'class' && !appointment ? <label>Participantes iniciais<select name="clientIds" multiple>{schedule.clients.map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label> : <label>Cliente<select name="clientId" required defaultValue={appointment?.client?.id ?? ''}><option value="" disabled>Selecione</option>{selectableClients.map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>}
+    {appointmentEditor && <Card title={appointment ? 'Alterar agendamento' : appointmentMode === 'class' ? 'Nova turma' : appointmentMode === 'series' ? 'Nova série semanal' : 'Novo agendamento individual'} description={appointmentMode === 'class' && !appointment ? 'A turma nasce vazia. Os pacientes entram depois, até a capacidade.' : 'O término é calculado pela duração do serviço.'}><form key={`${appointment?.id ?? 'new'}-${appointmentMode}`} className="schedule-form" onSubmit={saveAppointment}>
+      {appointmentMode === 'class' && !appointment ? <div><label><input type="checkbox" checked={includeParticipants} onChange={(event) => setIncludeParticipants(event.target.checked)} /> Incluir pacientes agora</label>{includeParticipants && <label>Pacientes<select name="clientIds" multiple>{schedule.clients.map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>}<small>Deixe sem pacientes para reservar a turma com antecedência.</small></div> : <label>Cliente<select name="clientId" required defaultValue={appointment?.client?.id ?? ''}><option value="" disabled>Selecione</option>{selectableClients.map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>}
       <label>Profissional<select name="professionalId" required defaultValue={appointment?.professional.id ?? ''}><option value="" disabled>Selecione</option>{schedule.professionals.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select></label>
       <label>Unidade<select name="unitId" required defaultValue={appointment?.unit.id ?? ''}><option value="" disabled>Selecione</option>{schedule.units.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label>Serviço<select name="serviceId" required defaultValue={appointment?.service.id ?? ''}><option value="" disabled>Selecione</option>{schedule.services.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.durationMinutes} min</option>)}</select></label>
       <label>Sala<select name="roomId" defaultValue={appointment?.room?.id ?? ''}><option value="">Sem sala</option>{schedule.rooms.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <fieldset className="schedule-equipment"><legend>Aparelhos</legend>{schedule.equipment.length === 0 ? <small>Nenhum aparelho ativo.</small> : schedule.equipment.map((item) => { const selected = appointment?.equipment.find(({ id }) => id === item.id); return <div key={item.id}><label><input type="checkbox" name="equipmentIds" value={item.id} defaultChecked={Boolean(selected)} /> {item.name}</label><input aria-label={`Quantidade de ${item.name}`} name={`equipmentQuantity:${item.id}`} type="number" min="1" max={item.quantity} defaultValue={selected?.quantity ?? 1} /></div> })}</fieldset>
       <label>Início<input name="startsAt" type="datetime-local" required defaultValue={appointment ? localValue(appointment.startsAt) : (preferredDate ? `${preferredDate}T10:00` : '')} /></label>
-      {appointmentMode === 'class' && !appointment && <label>Capacidade<input name="capacity" type="number" min="2" max="10000" required defaultValue="4" /><small>O máximo é o limite de clientes do expediente do profissional.</small></label>}
+      {appointmentMode === 'class' && !appointment && <label>Capacidade<input name="capacity" type="number" min="2" max="10000" required defaultValue="5" /><small>O máximo é o limite de clientes do expediente do profissional. A turma pode ficar com zero pacientes.</small></label>}
       {appointmentMode === 'series' && !appointment && <><label>Intervalo em semanas<input name="interval" type="number" min="1" max="52" required defaultValue="1" /></label><label>Ocorrências<input name="count" type="number" min="2" max="104" required defaultValue="4" /></label><label>Fuso IANA<input name="timezone" required defaultValue="America/Sao_Paulo" /></label></>}
       {appointment?.recurrence && <label>Aplicar alteração<select name="scope" defaultValue="single"><option value="single">Somente esta ocorrência</option><option value="future">Esta e as futuras</option></select></label>}
       <div><Button type="submit">Salvar agendamento</Button><Button type="button" variant="secondary" onClick={() => setAppointmentEditor(false)}>Fechar</Button></div>
     </form></Card>}
+
+    {gridEditor && <Card title="Nova grade de horários" description="A grade escolhe os serviços permitidos e abre turmas vazias, recorrentes, com profissional e capacidade."><form className="schedule-form" onSubmit={saveGrid}>
+      <label>Nome<input name="name" required minLength={2} maxLength={120} placeholder="Ex.: Reposições" /></label>
+      <label>Profissional da grade<select name="professionalId" required defaultValue=""><option value="" disabled>Selecione</option>{schedule.professionals.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select></label>
+      <label>Unidade da grade<select name="unitId" required defaultValue=""><option value="" disabled>Selecione</option>{schedule.units.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label>Serviços permitidos<select name="serviceIds" multiple required>{schedule.services.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label>Dia da grade<select name="weekday" defaultValue={1}>{weekdays.slice(1).map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label>
+      <label>Horário da turma<input name="localStartTime" type="time" required defaultValue="14:00" /></label>
+      <label>Duração em minutos<input name="durationMinutes" type="number" required min={5} max={1440} defaultValue={50} /></label>
+      <label>Capacidade da turma<input name="capacity" type="number" required min={2} max={10000} defaultValue={5} /></label>
+      <label>Quantidade de semanas<input name="occurrenceCount" type="number" required min={1} max={104} defaultValue={8} /></label>
+      <label>Primeira data<input name="startsOn" type="date" required defaultValue={preferredDate ?? ''} /></label>
+      <div><Button type="submit">Criar grade e turmas</Button><Button type="button" variant="secondary" onClick={() => setGridEditor(false)}>Fechar</Button></div>
+    </form></Card>}
+
+    {grids.length > 0 && <Card title="Grades de horário" description="Cada grade mantém a turma recorrente e os serviços que podem ser agendados nela."><ul className="schedule-list">{grids.map((item) => <li key={item.id}><div><strong>{item.name}</strong><span>{weekdays[item.weekday]}, {item.localStartTime} · {item.durationMinutes} min · {item.professionalName}</span><small>Capacidade {item.capacity} · {item.occurrenceCount} turmas · Serviços: {item.services.map((service) => service.name).join(', ')}</small></div></li>)}</ul></Card>}
 
     {visibleAppointments.some((item) => (item.waitlist?.length ?? 0) > 0) && <Card title="Filas de interesse" description="A ordem é preservada e somente uma vaga é oferecida por turma."><ul className="schedule-list">{visibleAppointments.flatMap((item) => (item.waitlist ?? []).map((entry) => <li key={entry.id}><div><strong>{item.service.name} · {entry.position}º</strong><span>{entry.client.fullName}</span><small>{entry.status === 'offered' ? `Oferta ativa até ${new Date(entry.offer!.expiresAt).toLocaleString('pt-BR')}` : 'Aguardando uma vaga'}</small></div></li>))}</ul></Card>}
 
@@ -312,10 +391,11 @@ export function ScheduleOperations({
       <label>Unidade<select name="unitId" required defaultValue={rule?.unitId ?? ''}><option value="" disabled>Selecione</option>{availability.units.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label>Descrição<input name="label" minLength={2} maxLength={120} defaultValue={rule?.label ?? ''} /></label><input name="timezone" type="hidden" value={rule?.timezone ?? 'America/Sao_Paulo'} readOnly />
       {weeklyRule ? <><label>Dia<select name="weekday" defaultValue={rule?.weekday ?? 1}>{weekdays.slice(1).map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label><label>Início<input name="localStartTime" type="time" defaultValue={rule?.localStartTime?.slice(0, 5) ?? '08:00'} /></label><label>Fim<input name="localEndTime" type="time" defaultValue={rule?.localEndTime?.slice(0, 5) ?? '18:00'} /></label>{ruleKind === 'working_hours' && <label>Limite de clientes<input name="clientLimit" type="number" required min={1} max={10000} defaultValue={rule?.clientLimit ?? 1} /></label>}</> : <><label>Início<input name="startsAt" type="datetime-local" defaultValue={rule?.startsAt ? localValue(rule.startsAt) : ''} /></label><label>Fim<input name="endsAt" type="datetime-local" defaultValue={rule?.endsAt ? localValue(rule.endsAt) : ''} /></label></>}
-      <div><Button type="submit">Salvar disponibilidade</Button><Button type="button" variant="secondary" onClick={() => setRuleEditor(false)}>Fechar</Button></div>
+      {!rule && weeklyRule && ruleKind === 'working_hours' && <div>{extraPeriods.map((period, index) => <div key={index}><label>Início do período {index + 2}<input type="time" value={period.start} onChange={(event) => setExtraPeriods((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, start: event.target.value } : item))} /></label><label>Fim do período {index + 2}<input type="time" value={period.end} onChange={(event) => setExtraPeriods((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, end: event.target.value } : item))} /></label><Button type="button" variant="secondary" onClick={() => setExtraPeriods((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remover período</Button></div>)}<Button type="button" variant="secondary" onClick={() => setExtraPeriods((current) => [...current, { start: '18:00', end: '22:00' }])}>Adicionar período no mesmo dia</Button><small>Use dois períodos para tarde e noite, por exemplo 13:00–18:00 e 18:00–22:00.</small></div>}
+      <div><Button type="submit">Salvar disponibilidade</Button><Button type="button" variant="secondary" onClick={() => { setRuleEditor(false); setExtraPeriods([]) }}>Fechar</Button></div>
     </form></Card>}
 
-    <div className="schedule-operations__grid"><Card title="Agendamentos, turmas e séries" description="Recursos, capacidade e estados são validados de forma atômica.">{visibleAppointments.length === 0 ? <EmptyState title="Nenhum agendamento no período" description="Crie um atendimento, uma turma ou uma série semanal." /> : <ul className="schedule-list">{visibleAppointments.map((item) => <li key={item.id}><div><strong>{item.service.name} <StatusBadge tone={item.status === 'completed' ? 'success' : 'neutral'}>{item.status === 'completed' ? 'Concluído' : 'Agendado'}</StatusBadge> {item.appointmentType === 'class' && <StatusBadge tone={item.occupancy >= item.capacity ? 'warning' : 'success'}>{item.occupancy}/{item.capacity} vagas</StatusBadge>} {item.recurrence && <StatusBadge tone="neutral">Série · {item.recurrence.occurrenceIndex + 1}/{item.recurrence.count}</StatusBadge>}</strong><span>{new Date(item.startsAt).toLocaleString('pt-BR')} · {item.appointmentType === 'class' ? `${item.occupancy} participantes` : item.client?.fullName}</span><small>{item.professional.displayName} · {item.unit.name}{item.room ? ` · ${item.room.name}` : ''}{item.equipment.length ? ` · ${item.equipment.map(({ name, quantity }) => `${quantity}× ${name}`).join(', ')}` : ''}</small><div>{item.participants.map((participant) => <span key={participant.id}>{participant.client.fullName} · {participantStates[participant.status]} {canManage && item.status === 'scheduled' && (participant.status === 'booked' || participant.status === 'confirmed') && <>{participant.status === 'booked' && <button type="button" className="schedule-inline-action" onClick={() => void markParticipant(item, participant.id, 'confirmed')}>confirmar</button>}<button type="button" className="schedule-inline-action" onClick={() => void markParticipant(item, participant.id, 'attended')}>presente</button><button type="button" className="schedule-inline-action" onClick={() => void markParticipant(item, participant.id, 'absent')}>falta</button><button type="button" className="schedule-inline-action" onClick={() => void markParticipant(item, participant.id, 'cancelled')}>cancelar</button></>}{participant.status === 'attended' && <button type="button" className="schedule-inline-action" title="Lançar recebimento no Financeiro" onClick={() => { sessionStorage.setItem('prefill_receivable', JSON.stringify({ clientId: participant.client.id, description: `${item.service.name} · ${participant.client.fullName}` })); window.location.hash = 'finance' }}>cobrar / nota</button>}</span>)}{item.appointmentType === 'class' && canManage && item.status === 'scheduled' && item.occupancy < item.capacity && <form className="schedule-participant-form" onSubmit={(event) => void addParticipant(event, item)}><select name="clientId" required defaultValue=""><option value="" disabled>Adicionar cliente</option>{schedule.clients.filter((client) => !item.participants.some((participant) => participant.client.id === client.id && ['booked', 'confirmed', 'attended'].includes(participant.status))).map((client) => <option key={client.id} value={client.id}>{client.fullName}</option>)}</select><Button type="submit" variant="secondary">Incluir</Button></form>}</div></div>{canManage && item.status === 'scheduled' && <div>{item.appointmentType !== 'class' && <Button type="button" variant="secondary" onClick={() => { setAppointmentMode(item.recurrence ? 'series' : 'individual'); setAppointment(item); setAppointmentEditor(true) }}>Alterar</Button>}<Button type="button" variant="secondary" onClick={() => void removeAppointment(item)}>Cancelar</Button></div>}</li>)}</ul>}</Card>
+    <div className="schedule-operations__grid"><Card title="Agendamentos, turmas e séries" description="Recursos, capacidade e estados são validados de forma atômica.">{visibleAppointments.length === 0 ? <EmptyState title="Nenhum agendamento no período" description="Crie um atendimento, uma turma ou uma série semanal." /> : <ul className="schedule-list">{visibleAppointments.map((item) => <li key={item.id}><div><strong>{item.service.name} <StatusBadge tone={item.status === 'completed' ? 'success' : 'neutral'}>{item.status === 'completed' ? 'Concluído' : 'Agendado'}</StatusBadge> {item.appointmentType === 'class' && <StatusBadge tone={item.occupancy >= item.capacity ? 'warning' : 'success'}>Capacidade {item.capacity} · Reservados {item.occupancy} · Disponíveis {Math.max(item.capacity - item.occupancy, 0)}</StatusBadge>} {item.recurrence && <StatusBadge tone="neutral">Série · {item.recurrence.occurrenceIndex + 1}/{item.recurrence.count}</StatusBadge>}</strong><span>{new Date(item.startsAt).toLocaleString('pt-BR')} · {item.appointmentType === 'class' ? `${item.occupancy} participantes` : item.client?.fullName}</span><small>{item.professional.displayName} · {item.unit.name}{item.room ? ` · ${item.room.name}` : ''}{item.equipment.length ? ` · ${item.equipment.map(({ name, quantity }) => `${quantity}× ${name}`).join(', ')}` : ''}</small><div>{item.participants.map((participant) => <span key={participant.id}>{participant.client.fullName} · {participantStates[participant.status]} {canManage && item.status === 'scheduled' && (participant.status === 'booked' || participant.status === 'confirmed') && <>{participant.status === 'booked' && <button type="button" className="schedule-inline-action" onClick={() => void markParticipant(item, participant.id, 'confirmed')}>confirmar</button>}<button type="button" className="schedule-inline-action" onClick={() => void markParticipant(item, participant.id, 'attended')}>presente</button><button type="button" className="schedule-inline-action" onClick={() => void markParticipant(item, participant.id, 'absent')}>falta</button><button type="button" className="schedule-inline-action" onClick={() => void markParticipant(item, participant.id, 'cancelled')}>cancelar</button></>}{participant.status === 'attended' && <button type="button" className="schedule-inline-action" title="Lançar recebimento no Financeiro" onClick={() => { sessionStorage.setItem('prefill_receivable', JSON.stringify({ clientId: participant.client.id, description: `${item.service.name} · ${participant.client.fullName}` })); window.location.hash = 'finance' }}>cobrar / nota</button>}</span>)}{item.appointmentType === 'class' && canManage && item.status === 'scheduled' && item.occupancy < item.capacity && <form className="schedule-participant-form" onSubmit={(event) => void addParticipant(event, item)}><select name="clientId" required defaultValue=""><option value="" disabled>Adicionar cliente</option>{schedule.clients.filter((client) => !item.participants.some((participant) => participant.client.id === client.id && ['booked', 'confirmed', 'attended'].includes(participant.status))).map((client) => <option key={client.id} value={client.id}>{client.fullName}</option>)}</select><Button type="submit" variant="secondary">Incluir</Button></form>}</div></div>{canManage && item.status === 'scheduled' && <div>{item.appointmentType !== 'class' && <Button type="button" variant="secondary" onClick={() => { setAppointmentMode(item.recurrence ? 'series' : 'individual'); setAppointment(item); setAppointmentEditor(true) }}>Alterar</Button>}<Button type="button" variant="secondary" onClick={() => void removeAppointment(item)}>Cancelar</Button></div>}</li>)}</ul>}</Card>
       <Card title="Disponibilidade e bloqueios" description="Férias, pausas e indisponibilidades têm precedência.">{availability.rules.length === 0 ? <EmptyState title="Nenhum expediente cadastrado" description="Cadastre um horário profissional antes de agendar." /> : <ul className="schedule-list">{availability.rules.map((item) => <li key={item.id}><div><strong>{kinds[item.kind]} <StatusBadge tone={item.active ? 'success' : 'neutral'}>{item.active ? 'Ativa' : 'Inativa'}</StatusBadge></strong><span>{item.label ?? item.professionalName}</span><small>{item.weekday ? `${weekdays[item.weekday]}, ${item.localStartTime?.slice(0, 5)}–${item.localEndTime?.slice(0, 5)}` : `${new Date(item.startsAt!).toLocaleString('pt-BR')}–${new Date(item.endsAt!).toLocaleString('pt-BR')}`} · {item.unitName}{item.kind === 'working_hours' && item.clientLimit ? ` · até ${item.clientLimit} ${item.clientLimit === 1 ? 'cliente' : 'clientes'}` : ''}</small></div>{canManage && <div><Button type="button" variant="secondary" onClick={() => { setRule(item); setRuleKind(item.kind); setRuleEditor(true) }}>Editar</Button><Button type="button" variant="secondary" onClick={() => void toggleRule(item)}>{item.active ? 'Inativar' : 'Ativar'}</Button></div>}</li>)}</ul>}</Card></div>
   </section>
 }

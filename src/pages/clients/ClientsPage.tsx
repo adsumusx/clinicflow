@@ -10,7 +10,9 @@ import {
   issueReplacementCredit,
   listClients,
   listPlans,
+  listProfessionals,
   listReplacementCredits,
+  scheduleContractSessions,
   updateClient,
   updateClientContract,
   type ClientInput,
@@ -18,8 +20,10 @@ import {
   type ClientRecord,
   type ClientType,
   type PlanRecord,
+  type ProfessionalOption,
   type ReplacementCreditsResponse,
 } from '@/features/clients'
+import { listResources } from '@/features/resources'
 import { ApiError, useAuth } from '@/features/auth'
 import { Button, Card, EmptyState, ErrorState, LoadingState, StatusBadge } from '@/shared/ui'
 import './ClientsPage.css'
@@ -86,8 +90,16 @@ const dateTimeFormatter = new Intl.DateTimeFormat('pt-BR', {
   dateStyle: 'short', timeStyle: 'short',
 })
 
+const saleWeekdays = ['', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo']
+
 function currency(value: number, code = 'BRL') {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: code }).format(value / 100)
+  const normalized = String(code || 'BRL').trim().toUpperCase()
+  const safe = /^[A-Z]{3}$/u.test(normalized) ? normalized : 'BRL'
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: safe }).format((Number(value) || 0) / 100)
+}
+
+function asPlans(value: unknown): PlanRecord[] {
+  return Array.isArray(value) ? value as PlanRecord[] : []
 }
 
 function RestrictedSection() {
@@ -133,6 +145,19 @@ export function ClientsPage() {
   const [contractEndsOn, setContractEndsOn] = useState('')
   const [contractPrice, setContractPrice] = useState('')
   const [savingContract, setSavingContract] = useState(false)
+  const [plansOpen, setPlansOpen] = useState(false)
+  const [newPlanKind, setNewPlanKind] = useState<'monthly' | 'package'>('monthly')
+  const [catalogKind, setCatalogKind] = useState<'monthly' | 'package'>('monthly')
+  const [catalogServices, setCatalogServices] = useState<Array<{ id: string; name: string }>>([])
+  const [catalogUnits, setCatalogUnits] = useState<Array<{ id: string; name: string }>>([])
+  const [saleProfessionals, setSaleProfessionals] = useState<ProfessionalOption[]>([])
+  const [sessionCount, setSessionCount] = useState('8')
+  const [saleProfessionalId, setSaleProfessionalId] = useState('')
+  const [saleServiceId, setSaleServiceId] = useState('')
+  const [saleUnitId, setSaleUnitId] = useState('')
+  const [saleSlots, setSaleSlots] = useState<Array<{ weekday: string; localTime: string }>>([{ weekday: '1', localTime: '14:00' }])
+  const [generateSessions, setGenerateSessions] = useState(true)
+  const [savingPlan, setSavingPlan] = useState(false)
 
   async function openNewContractForm() {
     if (!session?.organizationId) return
@@ -140,7 +165,7 @@ export function ClientsPage() {
     setContractStartsOn(new Date().toISOString().slice(0, 10))
     setContractEndsOn('')
     try {
-      const plans = await listPlans(session.organizationId)
+      const plans = asPlans(await listPlans(session.organizationId))
       setAvailablePlans(plans)
       if (plans.length > 0) {
         setSelectedPlanId(plans[0].id)
@@ -155,15 +180,80 @@ export function ClientsPage() {
     }
   }
 
+  async function loadSaleCatalog() {
+    if (!session?.organizationId) return
+    const [professionals, catalog] = await Promise.all([
+      listProfessionals(session.organizationId).catch(() => []),
+      listResources(session.organizationId, 'active').catch(() => null),
+    ])
+    const nextProfessionals = Array.isArray(professionals) ? professionals.filter((item) => item.active !== false) : []
+    const nextServices = catalog?.services?.filter((item) => item.active).map((item) => ({ id: item.id, name: item.name })) ?? []
+    const nextUnits = catalog?.units?.filter((item) => item.active).map((item) => ({ id: item.id, name: item.name })) ?? []
+    setSaleProfessionals(nextProfessionals)
+    setCatalogServices(nextServices)
+    setCatalogUnits(nextUnits)
+    setSaleProfessionalId((current) => current || nextProfessionals[0]?.id || '')
+    setSaleServiceId((current) => current || nextServices[0]?.id || '')
+    setSaleUnitId((current) => current || nextUnits[0]?.id || '')
+  }
+
   function handlePlanChange(planId: string) {
     setSelectedPlanId(planId)
     if (planId === '__new__') {
       setContractPrice('250.00')
-    } else {
-      const found = availablePlans.find((p) => p.id === planId)
-      if (found) {
-        setContractPrice((found.priceCents / 100).toFixed(2))
+      if (newPlanKind === 'package') void loadSaleCatalog()
+      return
+    }
+    const found = availablePlans.find((p) => p.id === planId)
+    if (found) {
+      setContractPrice((found.priceCents / 100).toFixed(2))
+      if (found.kind === 'package') {
+        setSessionCount(String(found.sessionCount ?? 8))
+        if (found.serviceId) setSaleServiceId(found.serviceId)
+        void loadSaleCatalog()
       }
+    }
+  }
+
+  async function openPlansCatalog() {
+    if (!session?.organizationId) return
+    setPlansOpen(true)
+    setError(null)
+    try {
+      setAvailablePlans(asPlans(await listPlans(session.organizationId)))
+      await loadSaleCatalog()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível carregar os planos da clínica.')
+    }
+  }
+
+  async function saveClinicPlan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!session?.organizationId) return
+    const form = event.currentTarget
+    const data = new FormData(form)
+    const name = String(data.get('name') ?? '').trim()
+    const priceCents = Math.round(Number(data.get('price') ?? 0) * 100)
+    setSavingPlan(true)
+    setError(null)
+    try {
+      if (!name) throw new Error('Informe o nome do plano.')
+      if (!Number.isInteger(priceCents) || priceCents < 0) throw new Error('Informe um valor válido para o plano.')
+      const created = await createPlan(session.organizationId, {
+        name,
+        priceCents,
+        kind: catalogKind,
+        sessionCount: catalogKind === 'package' ? Number(data.get('sessionCount')) : undefined,
+        serviceId: catalogKind === 'package' ? String(data.get('serviceId') || '') || null : null,
+      })
+      setAvailablePlans((current) => [...current.filter((plan) => plan.id !== created.id), created].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')))
+      setMessage('Plano cadastrado. Ele já pode ser escolhido na venda do contrato.')
+      form.reset()
+      setCatalogKind('monthly')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível salvar o plano.')
+    } finally {
+      setSavingPlan(false)
     }
   }
 
@@ -175,6 +265,19 @@ export function ClientsPage() {
     try {
       let planId = selectedPlanId
       const priceCents = Math.round(Number(contractPrice) * 100)
+      const selectedPlan = availablePlans.find((plan) => plan.id === planId)
+      const packageSale = planId === '__new__' ? newPlanKind === 'package' : selectedPlan?.kind === 'package'
+      if (packageSale) {
+        if (!Number.isInteger(Number(sessionCount)) || Number(sessionCount) < 1) {
+          throw new Error('Informe a quantidade de sessões do pacote.')
+        }
+        if (!saleProfessionalId) throw new Error('Escolha o profissional responsável.')
+        if (!saleSlots.length) throw new Error('Informe ao menos um horário semanal.')
+        if (generateSessions && canManageReplacements && !saleUnitId) throw new Error('Escolha a unidade das sessões.')
+        if (generateSessions && canManageReplacements && !saleServiceId && !selectedPlan?.serviceId) {
+          throw new Error('Escolha o serviço das sessões.')
+        }
+      }
       if (planId === '__new__') {
         if (!newPlanName.trim()) {
           throw new Error('Informe o nome do novo plano.')
@@ -182,22 +285,48 @@ export function ClientsPage() {
         const createdPlan = await createPlan(session.organizationId, {
           name: newPlanName.trim(),
           priceCents,
+          kind: newPlanKind,
+          sessionCount: newPlanKind === 'package' ? Number(sessionCount) : undefined,
+          serviceId: newPlanKind === 'package' ? saleServiceId || null : null,
         })
         planId = createdPlan.id
         setAvailablePlans((prev) => [...prev, createdPlan])
       }
-      await createClientContract(session.organizationId, profile.client.id, {
+      const saved = await createClientContract(session.organizationId, profile.client.id, {
         planId,
         startsOn: contractStartsOn,
         endsOn: contractEndsOn || null,
         agreedPriceCents: priceCents,
         status: 'active',
+        ...(packageSale ? {
+          sessionCount: Number(sessionCount),
+          professionalId: saleProfessionalId,
+          scheduleSlots: saleSlots.map((slot) => ({ weekday: Number(slot.weekday), localTime: slot.localTime })),
+        } : {}),
       })
+      let sessionMessage = 'Contrato do cliente vinculado com sucesso.'
+      if (packageSale && generateSessions && canManageReplacements) {
+        try {
+          const scheduled = await scheduleContractSessions(session.organizationId, profile.client.id, saved.id, {
+            unitId: saleUnitId,
+            serviceId: saleServiceId || selectedPlan?.serviceId || undefined,
+          })
+          sessionMessage = scheduled.created
+            ? `Contrato salvo. ${scheduled.count} sessões foram geradas na agenda.`
+            : 'Contrato salvo. As sessões deste pacote já estavam na agenda.'
+        } catch (scheduleError) {
+          setContractFormOpen(false)
+          setNewPlanName('')
+          setProfile(await getClientProfile(session.organizationId, profile.client.id))
+          await load()
+          throw new Error(`Contrato salvo. As sessões não foram geradas: ${scheduleError instanceof Error ? scheduleError.message : 'verifique o expediente do profissional.'}`)
+        }
+      }
       setContractFormOpen(false)
       setNewPlanName('')
       setProfile(await getClientProfile(session.organizationId, profile.client.id))
       await load()
-      setMessage('Contrato do cliente vinculado com sucesso.')
+      setMessage(sessionMessage)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível salvar o contrato.')
     } finally {
@@ -219,6 +348,26 @@ export function ClientsPage() {
       setMessage('Contrato cancelado com sucesso.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível cancelar o contrato.')
+    } finally {
+      setSavingContract(false)
+    }
+  }
+
+  async function generateSavedSessions(contractId: string) {
+    if (!session?.organizationId || !profile?.client.id) return
+    setSavingContract(true)
+    setError(null)
+    try {
+      const catalog = await listResources(session.organizationId, 'active')
+      const unitId = catalog.units.find((unit) => unit.active)?.id
+      if (!unitId) throw new Error('Cadastre uma unidade antes de gerar as sessões.')
+      const scheduled = await scheduleContractSessions(session.organizationId, profile.client.id, contractId, { unitId })
+      setProfile(await getClientProfile(session.organizationId, profile.client.id))
+      setMessage(scheduled.created
+        ? `${scheduled.count} sessões geradas na agenda.`
+        : 'As sessões deste pacote já estavam na agenda.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível gerar as sessões.')
     } finally {
       setSavingContract(false)
     }
@@ -411,11 +560,52 @@ export function ClientsPage() {
           <h1 id="clients-title">Clientes</h1>
           <p>Dados de contato seguros e isolados em {organization?.name}.</p>
         </div>
-        {canManage && <Button type="button" onClick={openNewClient}>Novo cliente</Button>}
+        <div>
+          {canManageContracts && <Button type="button" variant="secondary" onClick={() => void openPlansCatalog()}>Planos da clínica</Button>}
+          {canManage && <Button type="button" onClick={openNewClient}>Novo cliente</Button>}
+        </div>
       </header>
 
       {message && <p className="clients-page__message" role="status">{message}</p>}
       {error && <ErrorState compact title="Não foi possível concluir" description={error} />}
+
+      {plansOpen && canManageContracts && (
+        <Card title="Planos da clínica" description="Os planos cadastrados aqui aparecem na venda do contrato de cada paciente.">
+          {availablePlans.length === 0 ? <p>Nenhum plano ativo cadastrado.</p> : (
+            <ul className="client-profile__contract-list">
+              {availablePlans.map((plan) => (
+                <li key={plan.id}>
+                  <strong>{plan.name}</strong>
+                  <span>{plan.kind === 'package' ? `Pacote · ${plan.sessionCount ?? 0} sessões` : 'Mensalidade'} · {currency(plan.priceCents, plan.currency)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <form className="contract-form" onSubmit={saveClinicPlan}>
+            <label>Nome do plano<input name="name" required minLength={2} maxLength={120} placeholder="Ex.: Pilates 2x por semana" /></label>
+            <label>Tipo
+              <select value={catalogKind} onChange={(event) => setCatalogKind(event.target.value as 'monthly' | 'package')}>
+                <option value="monthly">Mensalidade</option>
+                <option value="package">Pacote de sessões</option>
+              </select>
+            </label>
+            <label>Valor (R$)<input name="price" type="number" required min={0} step="0.01" defaultValue="250.00" /></label>
+            {catalogKind === 'package' && <>
+              <label>Sessões<input name="sessionCount" type="number" required min={1} max={500} defaultValue={8} /></label>
+              <label>Serviço do pacote
+                <select name="serviceId" defaultValue="">
+                  <option value="">Definir na venda</option>
+                  {catalogServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}
+                </select>
+              </label>
+            </>}
+            <div className="contract-form__actions">
+              <Button type="submit" disabled={savingPlan}>{savingPlan ? 'Salvando plano…' : 'Cadastrar plano'}</Button>
+              <Button type="button" variant="secondary" onClick={() => setPlansOpen(false)}>Fechar</Button>
+            </div>
+          </form>
+        </Card>
+      )}
 
       {composerOpen && canManage && (
         <Card title={editing ? 'Editar cliente' : 'Novo cliente'} description="Nome é obrigatório. Documento e contatos não podem se repetir na clínica.">
@@ -518,22 +708,80 @@ export function ClientsPage() {
                         >
                           {availablePlans.map((plan) => (
                             <option key={plan.id} value={plan.id}>
-                              {plan.name} — {currency(plan.priceCents, plan.currency)}/mês
+                              {plan.name} — {currency(plan.priceCents, plan.currency)}{plan.kind === 'package' ? '' : '/mês'}
                             </option>
                           ))}
                           <option value="__new__">+ Criar novo plano…</option>
                         </select>
                       </label>
                       {selectedPlanId === '__new__' && (
-                        <label>
-                          Nome do novo plano
-                          <input
-                            required
-                            placeholder="Ex: Pilates 2x/semana"
-                            value={newPlanName}
-                            onChange={(e) => setNewPlanName(e.target.value)}
-                          />
-                        </label>
+                        <>
+                          <label>
+                            Nome do novo plano
+                            <input
+                              required
+                              placeholder="Ex: Pilates 2x/semana"
+                              value={newPlanName}
+                              onChange={(e) => setNewPlanName(e.target.value)}
+                            />
+                          </label>
+                          <label>
+                            Tipo do plano
+                            <select value={newPlanKind} onChange={(event) => {
+                              const kind = event.target.value as 'monthly' | 'package'
+                              setNewPlanKind(kind)
+                              if (kind === 'package') void loadSaleCatalog()
+                            }}>
+                              <option value="monthly">Mensalidade</option>
+                              <option value="package">Pacote de sessões</option>
+                            </select>
+                          </label>
+                        </>
+                      )}
+                      {availablePlans.length === 0 && selectedPlanId !== '__new__' && (
+                        <p>Nenhum plano ativo. Cadastre um em Planos da clínica para concluir a venda.</p>
+                      )}
+                      {(selectedPlanId === '__new__' ? newPlanKind === 'package' : availablePlans.find((plan) => plan.id === selectedPlanId)?.kind === 'package') && (
+                        <>
+                          <label>Quantidade de sessões
+                            <input type="number" required min={1} max={500} value={sessionCount} onChange={(event) => setSessionCount(event.target.value)} />
+                          </label>
+                          <label>Profissional responsável
+                            <select required value={saleProfessionalId} onChange={(event) => setSaleProfessionalId(event.target.value)}>
+                              <option value="" disabled>Selecione</option>
+                              {saleProfessionals.map((professional) => <option key={professional.id} value={professional.id}>{professional.displayName}</option>)}
+                            </select>
+                          </label>
+                          <label>Serviço das sessões
+                            <select value={saleServiceId} onChange={(event) => setSaleServiceId(event.target.value)}>
+                              <option value="">Usar o serviço do plano</option>
+                              {catalogServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}
+                            </select>
+                          </label>
+                          {canManageReplacements && <label>Unidade
+                            <select required={generateSessions} value={saleUnitId} onChange={(event) => setSaleUnitId(event.target.value)}>
+                              <option value="" disabled>Selecione</option>
+                              {catalogUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+                            </select>
+                          </label>}
+                          {saleSlots.map((slot, index) => (
+                            <div key={`${slot.weekday}-${index}`}>
+                              <label>Dia do horário {index + 1}
+                                <select value={slot.weekday} onChange={(event) => setSaleSlots((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, weekday: event.target.value } : item))}>
+                                  {saleWeekdays.slice(1).map((name, weekday) => <option key={name} value={weekday + 1}>{name}</option>)}
+                                </select>
+                              </label>
+                              <label>Hora do horário {index + 1}
+                                <input type="time" required value={slot.localTime} onChange={(event) => setSaleSlots((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, localTime: event.target.value } : item))} />
+                              </label>
+                            </div>
+                          ))}
+                          <div className="contract-form__actions">
+                            <Button type="button" variant="secondary" onClick={() => setSaleSlots((current) => [...current, { weekday: '3', localTime: '14:00' }])}>Adicionar horário</Button>
+                            {saleSlots.length > 1 && <Button type="button" variant="secondary" onClick={() => setSaleSlots((current) => current.slice(0, -1))}>Remover horário</Button>}
+                          </div>
+                          {canManageReplacements && <label><input type="checkbox" checked={generateSessions} onChange={(event) => setGenerateSessions(event.target.checked)} /> Gerar as sessões na agenda</label>}
+                        </>
                       )}
                       <label>
                         Data de início
@@ -556,7 +804,7 @@ export function ClientsPage() {
                         />
                       </label>
                       <label>
-                        Valor mensal acordado (R$)
+                        {(selectedPlanId === '__new__' ? newPlanKind === 'package' : availablePlans.find((plan) => plan.id === selectedPlanId)?.kind === 'package') ? 'Valor do pacote (R$)' : 'Valor mensal acordado (R$)'}
                         <input
                           name="agreedPrice"
                           type="number"
@@ -601,6 +849,8 @@ export function ClientsPage() {
                                 ? ` · Término: ${formatDay(contract.endsOn) ?? 'não informado'}`
                                 : ' · Vigência indeterminada'}
                             </small>
+                            {contract.sessionCount ? <small>{contract.sessionCount} sessões{contract.professionalName ? ` · ${contract.professionalName}` : ''}</small> : null}
+                            {contract.scheduleSlots?.length ? <small>{contract.scheduleSlots.map((slot) => `${saleWeekdays[slot.weekday]} ${slot.localTime}`).join(' · ')}</small> : null}
                           </div>
                           {canManageContracts && (contract.status === 'active' || contract.status === 'draft') && (
                             <div className="client-contract-card__actions">
@@ -620,6 +870,11 @@ export function ClientsPage() {
                                   onClick={() => void handleEndContract(contract.id)}
                                 >
                                   Encerrar
+                                </Button>
+                              )}
+                              {contract.sessionCount && canManageReplacements && (
+                                <Button type="button" variant="secondary" disabled={savingContract} onClick={() => void generateSavedSessions(contract.id)}>
+                                  Gerar sessões
                                 </Button>
                               )}
                             </div>

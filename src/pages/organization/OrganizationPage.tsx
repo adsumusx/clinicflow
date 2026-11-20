@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError, apiRequest, useAuth } from '@/features/auth'
+import { createProfessional, listProfessionals, type ProfessionalOption } from '@/features/clients'
 import { Button, Card, EmptyState, LoadingState, QrCode } from '@/shared/ui'
 import './OrganizationPage.css'
 
@@ -29,12 +30,16 @@ export function OrganizationPage() {
     inviteUrl: string
   } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [professionals, setProfessionals] = useState<ProfessionalOption[]>([])
+  const [savingProfessional, setSavingProfessional] = useState(false)
+  const [inviteRole, setInviteRole] = useState('professional')
 
   const organization = session?.organizations.find(({ id }) => id === session.organizationId)
   const permissions = organization?.permissions ?? []
   const canReadMemberships = permissions.includes('memberships.read')
   const canManageMemberships = permissions.includes('memberships.manage')
   const canManagePrivilegedRoles = permissions.includes('roles.manage_privileged')
+  const canRegisterProfessional = canManageMemberships || permissions.includes('schedule.manage')
 
   async function loadMemberships() {
     if (!session?.organizationId || !canReadMemberships) {
@@ -43,7 +48,12 @@ export function OrganizationPage() {
     }
     setLoading(true)
     try {
-      setMemberships(await apiRequest<Membership[]>(`/api/organizations/${session.organizationId}/memberships`))
+      const [nextMemberships, nextProfessionals] = await Promise.all([
+        apiRequest<Membership[]>(`/api/organizations/${session.organizationId}/memberships`),
+        canRegisterProfessional ? listProfessionals(session.organizationId).catch(() => []) : Promise.resolve([]),
+      ])
+      setMemberships(nextMemberships)
+      setProfessionals(Array.isArray(nextProfessionals) ? nextProfessionals : [])
     } catch (error) {
       if (error instanceof ApiError && error.status === 403) setMemberships([])
       else setMessage(error instanceof Error ? error.message : 'Não foi possível carregar a equipe.')
@@ -63,6 +73,7 @@ export function OrganizationPage() {
     const data = new FormData(form)
     const email = String(data.get('email') || '').trim() || undefined
     const roleCode = String(data.get('roleCode'))
+    const displayName = String(data.get('displayName') || '').trim()
     try {
       const response = await apiRequest<{
         id: string
@@ -71,7 +82,7 @@ export function OrganizationPage() {
         inviteUrl?: string
       }>(`/api/organizations/${session.organizationId}/memberships`, {
         method: 'POST',
-        body: JSON.stringify({ email, roleCode }),
+        body: JSON.stringify({ email, roleCode, displayName: displayName || undefined }),
       })
       form.reset()
       setMessage('Convite registrado com sucesso.')
@@ -104,6 +115,27 @@ export function OrganizationPage() {
       await loadMemberships()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Não foi possível revogar o vínculo.')
+    }
+  }
+
+  async function registerProfessional(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!session?.organizationId) return
+    const form = event.currentTarget
+    const data = new FormData(form)
+    setSavingProfessional(true)
+    try {
+      await createProfessional(session.organizationId, {
+        displayName: String(data.get('displayName') ?? ''),
+        registrationNumber: String(data.get('registrationNumber') ?? '') || null,
+      })
+      form.reset()
+      setMessage('Profissional disponível na agenda.')
+      await loadMemberships()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível cadastrar o profissional.')
+    } finally {
+      setSavingProfessional(false)
     }
   }
 
@@ -147,13 +179,19 @@ export function OrganizationPage() {
                 <input name="email" type="email" autoComplete="email" placeholder="nome@exemplo.com" />
               </label>
               <label>Função
-                <select name="roleCode" defaultValue="professional">
+                <select name="roleCode" value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}>
                   {canManagePrivilegedRoles && <option value="admin">Administrador</option>}
                   <option value="professional">Profissional</option>
                   <option value="reception_finance">Recepção/Financeiro</option>
                   <option value="client">Cliente</option>
                 </select>
               </label>
+              {inviteRole === 'professional' && (
+                <label>
+                  Nome na agenda
+                  <input name="displayName" minLength={2} maxLength={120} placeholder="Ex.: Samila" />
+                </label>
+              )}
               <Button type="submit">Gerar convite e QR Code</Button>
             </form>
           </Card>
@@ -231,6 +269,34 @@ export function OrganizationPage() {
               </Button>
             </div>
           </form>
+        </Card>
+      )}
+
+      {canRegisterProfessional && (
+        <Card title="Profissionais da agenda" description="O nome cadastrado aqui aparece na disponibilidade, nos agendamentos e nas turmas, mesmo antes da pessoa aceitar o convite.">
+          <form className="organization-form" onSubmit={registerProfessional}>
+            <label>
+              Nome
+              <input name="displayName" required minLength={2} maxLength={120} placeholder="Ex.: Samila" />
+            </label>
+            <label>
+              Registro no conselho (opcional)
+              <input name="registrationNumber" maxLength={80} placeholder="Ex.: CREFITO-3/12345-F" />
+            </label>
+            <Button type="submit" disabled={savingProfessional}>{savingProfessional ? 'Salvando…' : 'Cadastrar profissional'}</Button>
+          </form>
+          {professionals.length > 0 && (
+            <ul className="membership-list">
+              {professionals.map((professional) => (
+                <li key={professional.id}>
+                  <span>
+                    <strong>{professional.displayName}</strong>
+                    <small>{professional.active === false ? 'Inativo' : 'Disponível na agenda'}{professional.registrationNumber ? ` · ${professional.registrationNumber}` : ''}</small>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       )}
 

@@ -131,6 +131,38 @@ function dateOnly(value) {
   return typeof value === 'string' ? value.slice(0, 10) : value
 }
 
+function mapPlan(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    priceCents: Number(row.price_cents),
+    currency: row.currency,
+    billingRule: row.billing_rule,
+    active: row.active,
+    kind: row.kind ?? 'monthly',
+    sessionCount: row.session_count == null ? null : Number(row.session_count),
+    serviceId: row.service_id ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function calendarDate(value) {
+  if (value instanceof Date) {
+    const month = String(value.getMonth() + 1).padStart(2, '0')
+    const day = String(value.getDate()).padStart(2, '0')
+    return `${value.getFullYear()}-${month}-${day}`
+  }
+  return String(value).slice(0, 10)
+}
+
+function mapScheduleSlots(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((slot) => slot && Number.isInteger(Number(slot.weekday)) && slot.localTime)
+    .map((slot) => ({ weekday: Number(slot.weekday), localTime: String(slot.localTime).slice(0, 5) }))
+}
+
 const effectiveReceivableStatusSql = `CASE
   WHEN receivable.status = 'cancelled' THEN 'cancelled'
   WHEN balance.balance_cents <= 0 THEN 'paid'
@@ -396,6 +428,9 @@ function mapResourceRow(kind, row) {
     modalityId: row.modality_id,
     modalityName: row.modality_name,
     durationMinutes: row.duration_minutes,
+    category: row.category ?? null,
+    costCenter: row.cost_center ?? null,
+    priceCents: row.price_cents == null ? null : Number(row.price_cents),
   }
   if (kind === 'rooms') return {
     ...common,
@@ -1649,7 +1684,7 @@ export class PostgresAuthRepository {
     }))
   }
 
-  inviteMember({ actorUserId, organizationId, email, roleCode, inviteTokenHash, inviteTokenCiphertext, expiresAt }) {
+  inviteMember({ actorUserId, organizationId, email, roleCode, inviteTokenHash, inviteTokenCiphertext, expiresAt, displayName = null }) {
     return inTransaction(this.pool, async (client) => {
       const actor = await this.#requirePermission(client, actorUserId, organizationId, 'memberships.manage')
       const role = await client.query(
@@ -1704,6 +1739,19 @@ export class PostgresAuthRepository {
           targetId: membershipId,
           minimalMetadata: { roleCode, status: membershipStatus },
         })
+
+        if (roleCode === 'professional' && displayName) {
+          await client.query(
+            `INSERT INTO professionals (organization_id, membership_id, display_name, active)
+             VALUES ($1, $2, $3, true)
+             ON CONFLICT (organization_id, membership_id) DO UPDATE
+               SET display_name = EXCLUDED.display_name,
+                   active = true,
+                   deleted_at = NULL,
+                   updated_at = now()`,
+            [organizationId, membershipId, displayName],
+          )
+        }
       }
 
       return {
@@ -2687,11 +2735,16 @@ export class PostgresAuthRepository {
       }
       if (sections.plan) {
         const contracts = await client.query(
-          `SELECT contract.id, contract.plan_id, plan.name AS plan_name, contract.starts_on, contract.ends_on,
-                  contract.status, contract.agreed_price_cents, plan.currency
+          `SELECT contract.id, contract.plan_id, plan.name AS plan_name, plan.kind AS plan_kind,
+                  contract.starts_on, contract.ends_on, contract.status, contract.agreed_price_cents, plan.currency,
+                  contract.session_count, contract.schedule_slots, contract.professional_id,
+                  professional.display_name AS professional_name
            FROM contracts contract
            JOIN plans plan
              ON plan.organization_id = contract.organization_id AND plan.id = contract.plan_id
+           LEFT JOIN professionals professional
+             ON professional.organization_id = contract.organization_id
+            AND professional.id = contract.professional_id
            WHERE contract.organization_id = $1 AND contract.client_id = $2
            ORDER BY contract.starts_on DESC, contract.id DESC
            LIMIT 10`,
@@ -2701,11 +2754,16 @@ export class PostgresAuthRepository {
           id: row.id,
           planId: row.plan_id,
           name: row.plan_name,
+          kind: row.plan_kind ?? 'monthly',
           startsOn: dateOnly(row.starts_on),
           endsOn: row.ends_on == null ? null : dateOnly(row.ends_on),
           status: row.status,
           agreedPriceCents: Number(row.agreed_price_cents),
           currency: row.currency,
+          sessionCount: row.session_count == null ? null : Number(row.session_count),
+          professionalId: row.professional_id ?? null,
+          professionalName: row.professional_name ?? null,
+          scheduleSlots: mapScheduleSlots(row.schedule_slots),
         }))
       }
 
@@ -2958,6 +3016,58 @@ export class PostgresAuthRepository {
     })
   }
 
+  listProfessionals({ actorUserId, organizationId }) {
+    return inTransaction(this.pool, async (client) => {
+      await setTenantContext(client, actorUserId, organizationId)
+      await this.#requireAnyPermission(client, actorUserId, organizationId, [
+        'schedule.read', 'schedule.manage', 'clients.read', 'clients.manage', 'memberships.read',
+      ])
+      const result = await client.query(
+        `SELECT id, display_name, registration_number, active
+         FROM professionals
+         WHERE organization_id = $1 AND deleted_at IS NULL
+         ORDER BY active DESC, display_name, id`,
+        [organizationId],
+      )
+      return result.rows.map((row) => ({
+        id: row.id,
+        displayName: row.display_name,
+        registrationNumber: row.registration_number,
+        active: row.active,
+      }))
+    })
+  }
+
+  createProfessional({ actorUserId, organizationId, professional }) {
+    return inTransaction(this.pool, async (client) => {
+      await setTenantContext(client, actorUserId, organizationId)
+      const actor = await this.#requireAnyPermission(client, actorUserId, organizationId, [
+        'memberships.manage', 'schedule.manage',
+      ])
+      const inserted = await client.query(
+        `INSERT INTO professionals (organization_id, display_name, registration_number, active)
+         VALUES ($1, $2, $3, true)
+         RETURNING id, display_name, registration_number, active`,
+        [organizationId, professional.displayName, professional.registrationNumber],
+      )
+      const row = inserted.rows[0]
+      await appendAuditEvent(client, {
+        organizationId,
+        actorMembershipId: actor.id,
+        action: 'professional.created',
+        targetType: 'professional',
+        targetId: row.id,
+        minimalMetadata: { displayName: row.display_name },
+      })
+      return {
+        id: row.id,
+        displayName: row.display_name,
+        registrationNumber: row.registration_number,
+        active: row.active,
+      }
+    })
+  }
+
   listPlans({ actorUserId, organizationId }) {
     return inTransaction(this.pool, async (client) => {
       await setTenantContext(client, actorUserId, organizationId)
@@ -2965,22 +3075,13 @@ export class PostgresAuthRepository {
         'finance.read', 'clients.read', 'clients.manage', 'finance.manage',
       ])
       const result = await client.query(
-        `SELECT id, name, price_cents, currency, billing_rule, active, created_at, updated_at
+        `SELECT id, name, price_cents, currency, billing_rule, active, kind, session_count, service_id, created_at, updated_at
          FROM plans
          WHERE organization_id = $1 AND active = true
          ORDER BY name ASC, id ASC`,
         [organizationId],
       )
-      return result.rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        priceCents: Number(row.price_cents),
-        currency: row.currency,
-        billingRule: row.billing_rule,
-        active: row.active,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }))
+      return result.rows.map(mapPlan)
     })
   }
 
@@ -2990,15 +3091,23 @@ export class PostgresAuthRepository {
       const actor = await this.#requirePermission(client, actorUserId, organizationId, 'finance.manage')
       const planId = randomUUID()
       const result = await client.query(
-        `INSERT INTO plans (id, organization_id, name, price_cents, currency, billing_rule, active)
-         VALUES ($1, $2, $3, $4, 'BRL', $5, $6)
+        `INSERT INTO plans (
+           id, organization_id, name, price_cents, currency, billing_rule, active, kind, session_count, service_id
+         ) VALUES ($1, $2, $3, $4, 'BRL', $5, $6, $7, $8, $9)
          ON CONFLICT (organization_id, name) DO UPDATE
            SET price_cents = EXCLUDED.price_cents,
                billing_rule = EXCLUDED.billing_rule,
                active = true,
+               kind = EXCLUDED.kind,
+               session_count = EXCLUDED.session_count,
+               service_id = EXCLUDED.service_id,
                updated_at = now()
-         RETURNING id, name, price_cents, currency, billing_rule, active, created_at, updated_at`,
-        [planId, organizationId, plan.name, plan.priceCents, JSON.stringify(plan.billingRule ?? { frequency: 'monthly', dueDay: 10 }), plan.active !== false],
+         RETURNING id, name, price_cents, currency, billing_rule, active, kind, session_count, service_id, created_at, updated_at`,
+        [
+          planId, organizationId, plan.name, plan.priceCents,
+          JSON.stringify(plan.billingRule ?? { frequency: 'monthly', dueDay: 10 }),
+          plan.active !== false, plan.kind ?? 'monthly', plan.sessionCount ?? null, plan.serviceId ?? null,
+        ],
       )
       const row = result.rows[0]
       await appendAuditEvent(client, {
@@ -3012,16 +3121,7 @@ export class PostgresAuthRepository {
           priceCents: Number(row.price_cents),
         },
       })
-      return {
-        id: row.id,
-        name: row.name,
-        priceCents: Number(row.price_cents),
-        currency: row.currency,
-        billingRule: row.billing_rule,
-        active: row.active,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }
+      return mapPlan(row)
     })
   }
 
@@ -3036,12 +3136,17 @@ export class PostgresAuthRepository {
         throw new ServiceError(404, 'CLIENT_NOT_FOUND', 'Cliente não encontrado.')
       }
       const result = await client.query(
-        `SELECT contract.id, contract.client_id, contract.plan_id, plan.name AS plan_name,
+        `SELECT contract.id, contract.client_id, contract.plan_id, plan.name AS plan_name, plan.kind AS plan_kind,
                 contract.starts_on, contract.ends_on, contract.agreed_price_cents,
-                plan.currency, contract.status, contract.created_at, contract.updated_at
+                plan.currency, contract.status, contract.session_count, contract.schedule_slots,
+                contract.professional_id, professional.display_name AS professional_name,
+                contract.created_at, contract.updated_at
          FROM contracts contract
          JOIN plans plan
            ON plan.organization_id = contract.organization_id AND plan.id = contract.plan_id
+         LEFT JOIN professionals professional
+           ON professional.organization_id = contract.organization_id
+          AND professional.id = contract.professional_id
          WHERE contract.organization_id = $1 AND contract.client_id = $2
          ORDER BY contract.starts_on DESC, contract.id DESC`,
         [organizationId, clientId],
@@ -3051,11 +3156,16 @@ export class PostgresAuthRepository {
         clientId: row.client_id,
         planId: row.plan_id,
         name: row.plan_name,
+        kind: row.plan_kind ?? 'monthly',
         startsOn: row.starts_on instanceof Date ? row.starts_on.toISOString().slice(0, 10) : String(row.starts_on).slice(0, 10),
         endsOn: row.ends_on ? (row.ends_on instanceof Date ? row.ends_on.toISOString().slice(0, 10) : String(row.ends_on).slice(0, 10)) : null,
         agreedPriceCents: Number(row.agreed_price_cents),
         currency: row.currency,
         status: row.status,
+        sessionCount: row.session_count == null ? null : Number(row.session_count),
+        professionalId: row.professional_id ?? null,
+        professionalName: row.professional_name ?? null,
+        scheduleSlots: mapScheduleSlots(row.schedule_slots),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }))
@@ -3074,7 +3184,7 @@ export class PostgresAuthRepository {
       }
 
       const planRes = await client.query(
-        `SELECT id, name, price_cents, currency
+        `SELECT id, name, price_cents, currency, kind, session_count, service_id
          FROM plans
          WHERE organization_id = $1 AND id = $2 AND active = true`,
         [organizationId, contract.planId],
@@ -3087,14 +3197,24 @@ export class PostgresAuthRepository {
         ? contract.agreedPriceCents
         : Number(planRow.price_cents)
       const status = contract.status || 'active'
+      const sessionCount = contract.sessionCount ?? (planRow.kind === 'package' ? Number(planRow.session_count) : null)
+      if (planRow.kind === 'package' && (sessionCount == null || sessionCount < 1)) {
+        throw new ServiceError(400, 'INVALID_CONTRACT', 'Informe a quantidade de sessões do pacote.')
+      }
       const contractId = randomUUID()
 
       const inserted = await client.query(
         `INSERT INTO contracts (
-           id, organization_id, client_id, plan_id, starts_on, ends_on, agreed_price_cents, status
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id, client_id, plan_id, starts_on, ends_on, agreed_price_cents, status, created_at, updated_at`,
-        [contractId, organizationId, clientId, contract.planId, contract.startsOn, contract.endsOn ?? null, agreedPriceCents, status],
+           id, organization_id, client_id, plan_id, starts_on, ends_on, agreed_price_cents, status,
+           session_count, professional_id, schedule_slots
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+         RETURNING id, client_id, plan_id, starts_on, ends_on, agreed_price_cents, status,
+                   session_count, professional_id, schedule_slots, created_at, updated_at`,
+        [
+          contractId, organizationId, clientId, contract.planId, contract.startsOn, contract.endsOn ?? null,
+          agreedPriceCents, status, sessionCount, contract.professionalId ?? null,
+          JSON.stringify(contract.scheduleSlots ?? []),
+        ],
       )
 
       if (status === 'active' && (target.clientType === 'rotating' || target.client_type === 'rotating')) {
@@ -3139,14 +3259,131 @@ export class PostgresAuthRepository {
         clientId: row.client_id,
         planId: row.plan_id,
         name: planRow.name,
+        kind: planRow.kind ?? 'monthly',
         startsOn: row.starts_on instanceof Date ? row.starts_on.toISOString().slice(0, 10) : String(row.starts_on).slice(0, 10),
         endsOn: row.ends_on ? (row.ends_on instanceof Date ? row.ends_on.toISOString().slice(0, 10) : String(row.ends_on).slice(0, 10)) : null,
         agreedPriceCents: Number(row.agreed_price_cents),
         currency: planRow.currency,
         status: row.status,
+        sessionCount: row.session_count == null ? null : Number(row.session_count),
+        professionalId: row.professional_id ?? null,
+        scheduleSlots: mapScheduleSlots(row.schedule_slots),
+        serviceId: planRow.service_id ?? null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }
+    })
+  }
+
+  prepareContractSessions({ actorUserId, organizationId, clientId, contractId, serviceId, unitId }) {
+    return inTransaction(this.pool, async (client) => {
+      await setTenantContext(client, actorUserId, organizationId)
+      await this.#requirePermission(client, actorUserId, organizationId, 'schedule.manage')
+      const contract = await client.query(
+        `SELECT contract.id, contract.starts_on, contract.session_count, contract.schedule_slots,
+                contract.professional_id, contract.status, plan.service_id AS plan_service_id,
+                unit.timezone
+         FROM contracts contract
+         JOIN plans plan
+           ON plan.organization_id = contract.organization_id AND plan.id = contract.plan_id
+         JOIN units unit ON unit.organization_id = contract.organization_id AND unit.id = $4
+         WHERE contract.organization_id = $1 AND contract.client_id = $2 AND contract.id = $3`,
+        [organizationId, clientId, contractId, unitId],
+      )
+      if (!contract.rowCount) return null
+      const row = contract.rows[0]
+      if (!row.timezone) {
+        throw new ServiceError(400, 'INVALID_CONTRACT_SCHEDULE', 'Escolha uma unidade válida para as sessões.')
+      }
+      const existing = await client.query(
+        `SELECT count(*)::int AS total
+         FROM appointments
+         WHERE organization_id = $1 AND contract_id = $2 AND status <> 'cancelled'`,
+        [organizationId, contractId],
+      )
+      if (existing.rows[0].total > 0) {
+        return { alreadyScheduled: true, created: false, count: existing.rows[0].total }
+      }
+      const slots = mapScheduleSlots(row.schedule_slots)
+      const resolvedServiceId = serviceId || row.plan_service_id
+      if (!row.professional_id) {
+        throw new ServiceError(400, 'INVALID_CONTRACT_SCHEDULE', 'Informe o profissional responsável antes de gerar as sessões.')
+      }
+      if (!resolvedServiceId) {
+        throw new ServiceError(400, 'INVALID_CONTRACT_SCHEDULE', 'Escolha o serviço das sessões.')
+      }
+      if (!row.session_count) {
+        throw new ServiceError(400, 'INVALID_CONTRACT_SCHEDULE', 'O contrato não informa a quantidade de sessões.')
+      }
+      if (!slots.length) {
+        throw new ServiceError(400, 'INVALID_CONTRACT_SCHEDULE', 'Informe os horários do pacote antes de gerar as sessões.')
+      }
+      if (row.status === 'cancelled' || row.status === 'ended') {
+        throw new ServiceError(409, 'INVALID_CONTRACT_SCHEDULE', 'Contratos encerrados ou cancelados não geram sessões.')
+      }
+      return {
+        alreadyScheduled: false,
+        startsOn: calendarDate(row.starts_on),
+        sessionCount: Number(row.session_count),
+        scheduleSlots: slots,
+        professionalId: row.professional_id,
+        serviceId: resolvedServiceId,
+        timezone: row.timezone,
+      }
+    })
+  }
+
+  scheduleContractSessions({
+    actorUserId, organizationId, clientId, contractId, serviceId, professionalId, unitId, occurrences, timezone,
+  }) {
+    return inTransaction(this.pool, async (client) => {
+      await setTenantContext(client, actorUserId, organizationId)
+      const actor = await this.#requirePermission(client, actorUserId, organizationId, 'schedule.manage')
+      this.#requireProfessionalScope(actor, professionalId)
+      const existing = await client.query(
+        `SELECT count(*)::int AS total
+         FROM appointments
+         WHERE organization_id = $1 AND contract_id = $2 AND status <> 'cancelled'`,
+        [organizationId, contractId],
+      )
+      if (existing.rows[0].total > 0) {
+        return { created: false, count: existing.rows[0].total, contractId }
+      }
+      const created = []
+      for (const occurrence of occurrences) {
+        const inserted = await client.query(
+          `INSERT INTO appointments
+            (organization_id, unit_id, service_id, professional_id, starts_at, ends_at,
+             capacity, appointment_type, contract_id)
+           SELECT $1, $2, service.id, $4,
+                  make_timestamptz($5, $6, $7, $8, $9, 0, $10),
+                  make_timestamptz($5, $6, $7, $8, $9, 0, $10) + service.duration_minutes * interval '1 minute',
+                  1, 'individual', $11
+           FROM services service
+           WHERE service.organization_id = $1 AND service.id = $3 AND service.active
+           RETURNING id`,
+          [
+            organizationId, unitId, serviceId, professionalId,
+            occurrence.year, occurrence.month, occurrence.day, occurrence.hour, occurrence.minute,
+            timezone, contractId,
+          ],
+        )
+        if (!inserted.rowCount) {
+          throw new ServiceError(400, 'INVALID_APPOINTMENT_REFERENCE', 'O serviço não está disponível.')
+        }
+        const appointmentId = inserted.rows[0].id
+        await client.query(
+          `INSERT INTO appointment_participants
+            (organization_id, appointment_id, client_id, status)
+           VALUES ($1, $2, $3, 'confirmed')`,
+          [organizationId, appointmentId, clientId],
+        )
+        await this.#appendScheduleMutation(client, {
+          organizationId, actor, appointmentId, action: 'appointment.created',
+        })
+        created.push(appointmentId)
+      }
+      return { created: true, count: created.length, contractId }
     })
   }
 
@@ -5757,9 +5994,12 @@ export class PostgresAuthRepository {
       )
       if (kind === 'services') result = await client.query(
         `INSERT INTO services
-          (organization_id, modality_id, name, duration_minutes, active)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [organizationId, resource.modalityId, resource.name, resource.durationMinutes, resource.active],
+          (organization_id, modality_id, name, duration_minutes, active, category, cost_center, price_cents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [
+          organizationId, resource.modalityId, resource.name, resource.durationMinutes, resource.active,
+          resource.category ?? null, resource.costCenter ?? null, resource.priceCents ?? null,
+        ],
       )
       if (kind === 'rooms') result = await client.query(
         `INSERT INTO rooms (organization_id, unit_id, name, capacity, active)
@@ -5801,10 +6041,15 @@ export class PostgresAuthRepository {
         [organizationId, resourceId, resource.name, resource.active],
       )
       if (kind === 'services') await client.query(
-        `UPDATE services SET modality_id = $3, name = $4, duration_minutes = $5, active = $6
+        `UPDATE services
+         SET modality_id = $3, name = $4, duration_minutes = $5, active = $6,
+             category = $7, cost_center = $8, price_cents = $9
          WHERE organization_id = $1 AND id = $2`,
-        [organizationId, resourceId, resource.modalityId, resource.name,
-          resource.durationMinutes, resource.active],
+        [
+          organizationId, resourceId, resource.modalityId, resource.name,
+          resource.durationMinutes, resource.active,
+          resource.category ?? null, resource.costCenter ?? null, resource.priceCents ?? null,
+        ],
       )
       if (kind === 'rooms') await client.query(
         `UPDATE rooms SET unit_id = $3, name = $4, capacity = $5, active = $6
@@ -6072,6 +6317,139 @@ export class PostgresAuthRepository {
         organizationId, actor, appointmentId, action: 'class.created', appointmentType: 'class',
       })
       return selectAppointment(client, organizationId, appointmentId)
+    })
+  }
+
+  listScheduleGrids({ actorUserId, organizationId }) {
+    return inTransaction(this.pool, async (client) => {
+      await setTenantContext(client, actorUserId, organizationId)
+      await this.#requirePermission(client, actorUserId, organizationId, 'schedule.read')
+      const result = await client.query(
+        `SELECT grid.id, grid.name, grid.weekday, grid.local_start_time, grid.duration_minutes,
+                grid.capacity, grid.occurrence_count, grid.professional_id, grid.unit_id,
+                grid.service_id, grid.active, professional.display_name AS professional_name,
+                unit.name AS unit_name, service.name AS service_name,
+                COALESCE((
+                  SELECT jsonb_agg(jsonb_build_object('id', allowed.id, 'name', allowed.name) ORDER BY allowed.name)
+                  FROM schedule_grid_services link
+                  JOIN services allowed
+                    ON allowed.organization_id = link.organization_id AND allowed.id = link.service_id
+                  WHERE link.organization_id = grid.organization_id AND link.grid_id = grid.id
+                ), '[]'::jsonb) AS services
+         FROM schedule_grids grid
+         JOIN professionals professional
+           ON professional.organization_id = grid.organization_id AND professional.id = grid.professional_id
+         JOIN units unit ON unit.organization_id = grid.organization_id AND unit.id = grid.unit_id
+         JOIN services service
+           ON service.organization_id = grid.organization_id AND service.id = grid.service_id
+         WHERE grid.organization_id = $1
+         ORDER BY grid.active DESC, grid.name, grid.id`,
+        [organizationId],
+      )
+      return result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        weekday: row.weekday,
+        localStartTime: String(row.local_start_time).slice(0, 5),
+        durationMinutes: row.duration_minutes,
+        capacity: row.capacity,
+        occurrenceCount: row.occurrence_count,
+        professionalId: row.professional_id,
+        professionalName: row.professional_name,
+        unitId: row.unit_id,
+        unitName: row.unit_name,
+        serviceId: row.service_id,
+        serviceName: row.service_name,
+        services: row.services,
+        active: row.active,
+      }))
+    })
+  }
+
+  createScheduleGrid({ actorUserId, organizationId, grid }) {
+    return inTransaction(this.pool, async (client) => {
+      await setTenantContext(client, actorUserId, organizationId)
+      const actor = await this.#requirePermission(client, actorUserId, organizationId, 'schedule.manage')
+      this.#requireProfessionalScope(actor, grid.professionalId)
+      const services = await client.query(
+        `SELECT id FROM services
+         WHERE organization_id = $1 AND active AND id = ANY($2::uuid[])`,
+        [organizationId, grid.serviceIds],
+      )
+      if (services.rowCount !== grid.serviceIds.length) {
+        throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'Um dos serviços da grade está inativo ou não existe.')
+      }
+      const rule = await client.query(
+        `INSERT INTO recurrence_rules
+          (organization_id, recurrence_expression, series_start, series_end, timezone,
+           frequency, interval_count, occurrence_count, created_by_membership_id)
+         VALUES ($1, $2, $3, $4, $5, 'weekly', 1, $6, $7)
+         RETURNING id`,
+        [
+          organizationId, grid.recurrenceExpression, grid.startsOn, grid.seriesEnd,
+          grid.timezone, grid.occurrenceCount, actor.id,
+        ],
+      )
+      const recurrenceRuleId = rule.rows[0].id
+      const insertedGrid = await client.query(
+        `INSERT INTO schedule_grids
+          (organization_id, name, unit_id, professional_id, service_id, weekday, local_start_time,
+           duration_minutes, capacity, timezone, starts_on, occurrence_count, recurrence_rule_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         RETURNING id`,
+        [
+          organizationId, grid.name, grid.unitId, grid.professionalId, grid.serviceIds[0],
+          grid.weekday, grid.localStartTime, grid.durationMinutes, grid.capacity, grid.timezone,
+          grid.startsOn, grid.occurrenceCount, recurrenceRuleId,
+        ],
+      )
+      const gridId = insertedGrid.rows[0].id
+      for (const serviceId of grid.serviceIds) {
+        await client.query(
+          `INSERT INTO schedule_grid_services (organization_id, grid_id, service_id)
+           VALUES ($1, $2, $3)`,
+          [organizationId, gridId, serviceId],
+        )
+      }
+      for (const [occurrenceIndex, occurrence] of grid.occurrences.entries()) {
+        const inserted = await client.query(
+          `INSERT INTO appointments
+            (organization_id, unit_id, service_id, professional_id, recurrence_rule_id, occurrence_index,
+             starts_at, ends_at, capacity, appointment_type)
+           SELECT $1, $2, service.id, $4, $5, $6,
+                  make_timestamptz($7, $8, $9, $10, $11, 0, $12),
+                  make_timestamptz($7, $8, $9, $10, $11, 0, $12) + $13 * interval '1 minute',
+                  $14, 'class'
+           FROM services service
+           WHERE service.organization_id = $1 AND service.id = $3 AND service.active
+           RETURNING id`,
+          [
+            organizationId, grid.unitId, grid.serviceIds[0], grid.professionalId, recurrenceRuleId,
+            occurrenceIndex, occurrence.year, occurrence.month, occurrence.day, occurrence.hour,
+            occurrence.minute, grid.timezone, grid.durationMinutes, grid.capacity,
+          ],
+        )
+        if (!inserted.rowCount) {
+          throw new ServiceError(400, 'INVALID_APPOINTMENT_REFERENCE', 'O serviço da turma não está disponível.')
+        }
+        await this.#appendScheduleMutation(client, {
+          organizationId, actor, appointmentId: inserted.rows[0].id,
+          action: 'class.created', appointmentType: 'class', scope: 'series',
+        })
+      }
+      await appendAuditEvent(client, {
+        organizationId, actorMembershipId: actor.id, action: 'schedule_grid.created',
+        targetType: 'schedule_grid', targetId: gridId,
+        minimalMetadata: { name: grid.name, weekday: grid.weekday, capacity: grid.capacity },
+      })
+      const listed = await client.query(
+        `SELECT grid.id FROM schedule_grids grid WHERE grid.organization_id = $1 AND grid.id = $2`,
+        [organizationId, gridId],
+      )
+      return {
+        id: listed.rows[0].id,
+        appointmentsCreated: grid.occurrences.length,
+      }
     })
   }
 

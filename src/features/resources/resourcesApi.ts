@@ -24,6 +24,9 @@ export interface ServiceResource extends BaseResource {
   durationMinutes: number
   modalityId: string
   modalityName: string
+  category?: string | null
+  costCenter?: string | null
+  priceCents?: number | null
 }
 
 export interface RoomResource extends BaseResource {
@@ -50,9 +53,12 @@ export type ResourceRecord = ModalityResource | ServiceResource | RoomResource |
 export type ResourceInput = {
   active: boolean
   capacity?: number
+  category?: string | null
+  costCenter?: string | null
   durationMinutes?: number
   modalityId?: string
   name: string
+  priceCents?: number | null
   quantity?: number
   unitId?: string
 }

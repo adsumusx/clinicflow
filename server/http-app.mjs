@@ -549,6 +549,17 @@ export function createHttpHandler(authService, options = {}) {
         ))
       }
 
+      const contractSessionsRoute = url.pathname.match(
+        /^\/api\/organizations\/([0-9a-f-]+)\/clients\/([0-9a-f-]+)\/contracts\/([0-9a-f-]+)\/sessions$/i,
+      )
+      if (contractSessionsRoute && request.method === 'POST') {
+        requireSameOrigin(request)
+        return json(response, 201, await authService.scheduleContractSessions(
+          token, contractSessionsRoute[1], contractSessionsRoute[2], contractSessionsRoute[3],
+          await readJson(request),
+        ))
+      }
+
       const clientContractsRoute = url.pathname.match(
         /^\/api\/organizations\/([0-9a-f-]+)\/clients\/([0-9a-f-]+)\/contracts(?:\/([0-9a-f-]+))?$/i,
       )
@@ -815,6 +826,19 @@ export function createHttpHandler(authService, options = {}) {
         ))
       }
 
+      const scheduleGridRoute = url.pathname.match(
+        /^\/api\/organizations\/([0-9a-f-]+)\/schedule-grids$/i,
+      )
+      if (scheduleGridRoute && request.method === 'GET') {
+        return json(response, 200, await authService.listScheduleGrids(token, scheduleGridRoute[1]))
+      }
+      if (scheduleGridRoute && request.method === 'POST') {
+        requireSameOrigin(request)
+        return json(response, 201, await authService.createScheduleGrid(
+          token, scheduleGridRoute[1], await readJson(request),
+        ))
+      }
+
       const classRoute = url.pathname.match(
         /^\/api\/organizations\/([0-9a-f-]+)\/appointments\/classes$/i,
       )
@@ -908,6 +932,19 @@ export function createHttpHandler(authService, options = {}) {
         requireSameOrigin(request)
         return json(response, 200, await authService.cancelAppointment(
           token, appointmentRoute[1], appointmentRoute[2],
+        ))
+      }
+
+      const professionalsRoute = url.pathname.match(
+        /^\/api\/organizations\/([0-9a-f-]+)\/professionals$/i,
+      )
+      if (professionalsRoute && request.method === 'GET') {
+        return json(response, 200, await authService.listProfessionals(token, professionalsRoute[1]))
+      }
+      if (professionalsRoute && request.method === 'POST') {
+        requireSameOrigin(request)
+        return json(response, 201, await authService.createProfessional(
+          token, professionalsRoute[1], await readJson(request),
         ))
       }
 

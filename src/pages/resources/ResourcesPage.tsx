@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { ApiError, useAuth } from '@/features/auth'
+import { useAuth } from '@/features/auth'
 import {
   createResource,
   listResources,
@@ -30,10 +30,18 @@ type ResourceScreen = { type: 'list' } | { type: 'composer'; resource: ResourceR
 function inputFromForm(kind: ResourceKind, form: HTMLFormElement): ResourceInput {
   const data = new FormData(form)
   const common = { name: String(data.get('name') ?? ''), active: data.get('active') === 'on' }
-  if (kind === 'services') return {
-    ...common,
-    modalityId: String(data.get('modalityId') ?? ''),
-    durationMinutes: Number(data.get('durationMinutes')),
+  if (kind === 'services') {
+    const price = String(data.get('price') ?? '').trim()
+    const category = String(data.get('category') ?? '').trim()
+    const costCenter = String(data.get('costCenter') ?? '').trim()
+    return {
+      ...common,
+      modalityId: String(data.get('modalityId') ?? ''),
+      durationMinutes: Number(data.get('durationMinutes')),
+      category: category || null,
+      costCenter: costCenter || null,
+      priceCents: price === '' ? null : Math.round(Number(price) * 100),
+    }
   }
   if (kind === 'rooms') return {
     ...common, unitId: String(data.get('unitId') ?? ''), capacity: Number(data.get('capacity')),
@@ -48,7 +56,14 @@ function inputFromResource(kind: ResourceKind, resource: ResourceRecord, active:
   const common = { name: resource.name, active }
   if (kind === 'services') {
     const service = resource as ServiceResource
-    return { ...common, modalityId: service.modalityId, durationMinutes: service.durationMinutes }
+    return {
+      ...common,
+      modalityId: service.modalityId,
+      durationMinutes: service.durationMinutes,
+      category: service.category ?? null,
+      costCenter: service.costCenter ?? null,
+      priceCents: service.priceCents ?? null,
+    }
   }
   if (kind === 'rooms') {
     const room = resource as RoomResource
@@ -64,7 +79,8 @@ function inputFromResource(kind: ResourceKind, resource: ResourceRecord, active:
 function detail(kind: ResourceKind, resource: ResourceRecord) {
   if (kind === 'services') {
     const service = resource as ServiceResource
-    return `${service.modalityName} · ${service.durationMinutes} min`
+    const price = service.priceCents == null ? '' : ` · ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(service.priceCents / 100)}`
+    return `${service.modalityName} · ${service.durationMinutes} min${service.category ? ` · ${service.category}` : ''}${service.costCenter ? ` · ${service.costCenter}` : ''}${price}`
   }
   if (kind === 'rooms') {
     const room = resource as RoomResource
@@ -125,7 +141,18 @@ export function ResourcesPage() {
     setSaving(true)
     setError(null)
     try {
-      const input = inputFromForm(kind, event.currentTarget)
+      let input = inputFromForm(kind, event.currentTarget)
+      if (kind === 'services' && input.priceCents != null && Number.isNaN(input.priceCents)) {
+        throw new Error('Informe um valor válido para o serviço.')
+      }
+      if (kind === 'services' && !input.modalityId) {
+        const modalityName = String(new FormData(event.currentTarget).get('newModalityName') ?? '').trim()
+        if (modalityName.length < 2) {
+          throw new Error('Cadastre uma modalidade antes do serviço. Exemplo: Pilates.')
+        }
+        const modality = await createResource(session.organizationId, 'modalities', { name: modalityName, active: true })
+        input = { ...input, modalityId: modality.id }
+      }
       if (editing) await updateResource(session.organizationId, kind, editing.id, input)
       else await createResource(session.organizationId, kind, input)
       const feminine = kind === 'modalities' || kind === 'rooms'
@@ -136,7 +163,7 @@ export function ResourcesPage() {
       setScreen({ type: 'list' })
       await load()
     } catch (requestError) {
-      setError(requestError instanceof ApiError ? requestError.message : 'Não foi possível salvar o recurso.')
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível salvar o recurso.')
     } finally {
       setSaving(false)
     }
@@ -194,8 +221,15 @@ export function ResourcesPage() {
           <form key={`${kind}:${editing?.id ?? 'new'}`} className="resource-form" onSubmit={save}>
             <label>Nome<input name="name" required minLength={2} maxLength={120} defaultValue={editing?.name} /></label>
             {kind === 'services' && <>
-              <label>Modalidade<select name="modalityId" required defaultValue={serviceEditing?.modalityId ?? ''}><option value="" disabled>Selecione</option>{catalog.modalities.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? '' : ' (inativa)'}</option>)}</select></label>
+              {catalog.modalities.length === 0 ? (
+                <label>Modalidade<input name="newModalityName" required minLength={2} maxLength={120} placeholder="Ex.: Pilates" /></label>
+              ) : (
+                <label>Modalidade<select name="modalityId" required defaultValue={serviceEditing?.modalityId ?? ''}><option value="" disabled>Selecione</option>{catalog.modalities.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? '' : ' (inativa)'}</option>)}</select></label>
+              )}
               <label>Duração em minutos<input name="durationMinutes" type="number" required min={5} max={1440} defaultValue={serviceEditing?.durationMinutes ?? 50} /></label>
+              <label>Categoria<input name="category" minLength={2} maxLength={80} defaultValue={serviceEditing?.category ?? ''} placeholder="Ex.: Pilates" /></label>
+              <label>Centro de custo<input name="costCenter" minLength={2} maxLength={80} defaultValue={serviceEditing?.costCenter ?? ''} placeholder="Ex.: Estúdio" /></label>
+              <label>Valor (R$)<input name="price" type="number" min={0} step="0.01" defaultValue={serviceEditing?.priceCents == null ? '' : (serviceEditing.priceCents / 100).toFixed(2)} /></label>
             </>}
             {(kind === 'rooms' || kind === 'equipment') && <label>Unidade<select name="unitId" required defaultValue={(kind === 'rooms' ? roomEditing?.unitId : equipmentEditing?.unitId) ?? ''}><option value="" disabled>Selecione</option>{catalog.units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}{unit.active ? '' : ' (inativa)'}</option>)}</select></label>}
             {kind === 'rooms' && <label>Capacidade<input name="capacity" type="number" required min={1} max={10000} defaultValue={roomEditing?.capacity ?? 1} /></label>}

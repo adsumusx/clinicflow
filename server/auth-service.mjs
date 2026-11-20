@@ -147,7 +147,23 @@ function normalizePlanInput(input) {
     ? input.billingRule
     : { frequency: 'monthly', dueDay: 10 }
   const active = input.active !== false
-  return { name, priceCents, billingRule, active }
+  const kind = input.kind === undefined || input.kind === null || input.kind === ''
+    ? 'monthly'
+    : String(input.kind)
+  if (kind !== 'monthly' && kind !== 'package') {
+    throw new ServiceError(400, 'INVALID_PLAN', 'O plano deve ser mensalidade ou pacote de sessões.')
+  }
+  let sessionCount = null
+  if (kind === 'package') {
+    sessionCount = Number(input.sessionCount)
+    if (!Number.isInteger(sessionCount) || sessionCount < 1 || sessionCount > 500) {
+      throw new ServiceError(400, 'INVALID_PLAN', 'Informe a quantidade de sessões do pacote, entre 1 e 500.')
+    }
+  }
+  const serviceId = input.serviceId === undefined || input.serviceId === null || input.serviceId === ''
+    ? null
+    : requireUuid(input.serviceId, 'INVALID_PLAN', 'Escolha um serviço válido para o pacote.')
+  return { name, priceCents, billingRule, active, kind, sessionCount, serviceId }
 }
 
 function normalizeContractInput(input) {
@@ -175,7 +191,37 @@ function normalizeContractInput(input) {
   if (!contractStatuses.has(status)) {
     throw new ServiceError(400, 'INVALID_CONTRACT', 'Situação do contrato inválida.')
   }
-  return { planId, startsOn, endsOn, agreedPriceCents, status }
+  const contract = { planId, startsOn, endsOn, agreedPriceCents, status }
+  if (input.sessionCount !== undefined && input.sessionCount !== null && input.sessionCount !== '') {
+    const sessionCount = Number(input.sessionCount)
+    if (!Number.isInteger(sessionCount) || sessionCount < 1 || sessionCount > 500) {
+      throw new ServiceError(400, 'INVALID_CONTRACT', 'Informe a quantidade de sessões entre 1 e 500.')
+    }
+    contract.sessionCount = sessionCount
+  }
+  if (input.professionalId) {
+    contract.professionalId = requireUuid(
+      input.professionalId, 'INVALID_CONTRACT', 'Escolha o profissional responsável pela venda.',
+    )
+  }
+  const scheduleSlots = normalizeScheduleSlots(input.scheduleSlots)
+  if (scheduleSlots.length) contract.scheduleSlots = scheduleSlots
+  return contract
+}
+
+function normalizeScheduleSlots(value) {
+  if (value === undefined || value === null || value === '') return []
+  if (!Array.isArray(value) || value.length > 14) {
+    throw new ServiceError(400, 'INVALID_CONTRACT', 'Informe até 14 horários semanais para o pacote.')
+  }
+  return value.map((slot) => {
+    const weekday = Number(slot?.weekday)
+    const localTime = normalizeTime(slot?.localTime)
+    if (!Number.isInteger(weekday) || weekday < 1 || weekday > 7 || !localTime) {
+      throw new ServiceError(400, 'INVALID_CONTRACT', 'Cada horário precisa de um dia da semana e uma hora válida.')
+    }
+    return { weekday, localTime }
+  })
 }
 
 function normalizeContractPatch(input) {
@@ -569,7 +615,19 @@ function normalizeResourceInput(kind, input) {
     if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440) {
       throw new ServiceError(400, 'INVALID_RESOURCE', 'Duração do serviço inválida.')
     }
-    return { ...normalized, modalityId: input.modalityId, durationMinutes }
+    const service = { ...normalized, modalityId: input.modalityId, durationMinutes }
+    const category = optionalResourceLabel(input.category, 'Informe uma categoria entre 2 e 80 caracteres.')
+    const costCenter = optionalResourceLabel(input.costCenter, 'Informe um centro de custo entre 2 e 80 caracteres.')
+    if (category) service.category = category
+    if (costCenter) service.costCenter = costCenter
+    if (input.priceCents !== undefined && input.priceCents !== null && input.priceCents !== '') {
+      const priceCents = Number(input.priceCents)
+      if (!Number.isInteger(priceCents) || priceCents < 0) {
+        throw new ServiceError(400, 'INVALID_RESOURCE', 'O valor do serviço deve ser um inteiro em centavos maior ou igual a zero.')
+      }
+      service.priceCents = priceCents
+    }
+    return service
   }
   if (kind === 'rooms' || kind === 'equipment') {
     if (!uuidPattern.test(input.unitId ?? '')) {
@@ -583,6 +641,15 @@ function normalizeResourceInput(kind, input) {
     return { ...normalized, unitId: input.unitId, [quantityField]: quantity }
   }
   return normalized
+}
+
+function optionalResourceLabel(value, message) {
+  if (value === undefined || value === null || value === '') return null
+  const text = typeof value === 'string' ? value.trim().replace(/\s+/gu, ' ') : ''
+  if (text.length < 2 || text.length > 80) {
+    throw new ServiceError(400, 'INVALID_RESOURCE', message)
+  }
+  return text
 }
 
 function requireUuid(value, code, message) {
@@ -765,6 +832,123 @@ function localDateTimeToInstant(parts, timezone) {
 
 function localDate(parts) {
   return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
+}
+
+function parseIsoDateUtc(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value ?? '')
+  if (!match) return null
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+}
+
+function isoWeekday(date) {
+  const day = date.getUTCDay()
+  return day === 0 ? 7 : day
+}
+
+function addUtcDays(date, days) {
+  const next = new Date(date)
+  next.setUTCDate(next.getUTCDate() + days)
+  return next
+}
+
+function calendarParts(date, hour, minute) {
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+    hour,
+    minute,
+  }
+}
+
+function buildWeeklySlotOccurrences({ startsOn, sessionCount, slots }) {
+  const start = parseIsoDateUtc(startsOn)
+  if (!start) {
+    throw new ServiceError(400, 'INVALID_CONTRACT_SCHEDULE', 'Informe a data de início das sessões.')
+  }
+  const occurrences = []
+  for (let offset = 0; offset < 800 && occurrences.length < sessionCount; offset += 1) {
+    const day = addUtcDays(start, offset)
+    const weekday = isoWeekday(day)
+    const matches = slots
+      .filter((slot) => slot.weekday === weekday)
+      .sort((left, right) => left.localTime.localeCompare(right.localTime))
+    for (const slot of matches) {
+      if (occurrences.length >= sessionCount) break
+      const [hour, minute] = slot.localTime.split(':').map(Number)
+      occurrences.push(calendarParts(day, hour, minute))
+    }
+  }
+  if (occurrences.length < sessionCount) {
+    throw new ServiceError(
+      400, 'INVALID_CONTRACT_SCHEDULE', 'Não foi possível distribuir todas as sessões nos horários informados.',
+    )
+  }
+  return occurrences
+}
+
+function normalizeScheduleGridInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'Informe os dados da grade.')
+  }
+  const name = requireText(input.name, 120)
+  if (!name || name.length < 2) {
+    throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'O nome da grade deve ter entre 2 e 120 caracteres.')
+  }
+  const professionalId = requireUuid(
+    input.professionalId, 'INVALID_SCHEDULE_GRID', 'Escolha o profissional da turma.',
+  )
+  const unitId = requireUuid(input.unitId, 'INVALID_SCHEDULE_GRID', 'Escolha a unidade da grade.')
+  if (!Array.isArray(input.serviceIds) || input.serviceIds.length < 1 || input.serviceIds.length > 30) {
+    throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'Escolha os serviços que podem ser agendados nesta grade.')
+  }
+  const serviceIds = [...new Set(input.serviceIds.map((serviceId) => requireUuid(
+    serviceId, 'INVALID_SCHEDULE_GRID', 'Escolha serviços válidos para a grade.',
+  )))]
+  const weekday = Number(input.weekday)
+  const localStartTime = normalizeTime(input.localStartTime)
+  const durationMinutes = Number(input.durationMinutes)
+  const capacity = Number(input.capacity)
+  const occurrenceCount = Number(input.occurrenceCount ?? 8)
+  const timezone = typeof input.timezone === 'string' && input.timezone.trim()
+    ? input.timezone.trim() : 'America/Sao_Paulo'
+  try {
+    new Intl.DateTimeFormat('pt-BR', { timeZone: timezone }).format(new Date(0))
+  } catch {
+    throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'Informe um fuso horário IANA válido.')
+  }
+  if (!Number.isInteger(weekday) || weekday < 1 || weekday > 7 || !localStartTime) {
+    throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'Informe o dia e o horário da turma.')
+  }
+  if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440) {
+    throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'A duração da turma deve ficar entre 5 e 1440 minutos.')
+  }
+  if (!Number.isInteger(capacity) || capacity < 2 || capacity > 10000) {
+    throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'Informe a capacidade da turma.')
+  }
+  if (!Number.isInteger(occurrenceCount) || occurrenceCount < 1 || occurrenceCount > 104) {
+    throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'A grade deve gerar de 1 a 104 turmas.')
+  }
+  const today = zonedParts(new Date(), timezone)
+  const startsOn = input.startsOn
+    ? optionalDate(input.startsOn, 'INVALID_SCHEDULE_GRID', 'Informe a data inicial da grade.')
+    : localDate(today)
+  if (!startsOn) {
+    throw new ServiceError(400, 'INVALID_SCHEDULE_GRID', 'Informe a data inicial da grade.')
+  }
+  const start = parseIsoDateUtc(startsOn)
+  const delta = (weekday - isoWeekday(start) + 7) % 7
+  const first = addUtcDays(start, delta)
+  const [hour, minute] = localStartTime.split(':').map(Number)
+  const occurrences = Array.from({ length: occurrenceCount }, (_, index) => (
+    calendarParts(addUtcDays(first, index * 7), hour, minute)
+  ))
+  return {
+    name, professionalId, unitId, serviceIds, weekday, localStartTime,
+    durationMinutes, capacity, occurrenceCount, timezone, startsOn, occurrences,
+    recurrenceExpression: `FREQ=WEEKLY;INTERVAL=1;COUNT=${occurrenceCount}`,
+    seriesEnd: localDate(occurrences.at(-1)),
+  }
 }
 
 function normalizeAppointmentSeriesInput(input) {
@@ -1324,6 +1508,12 @@ export class AuthService {
     if (roleCode === 'owner' || roleCode === 'admin') {
       this.#requirePermission(session, organizationId, 'roles.manage_privileged')
     }
+    const displayName = input?.displayName === undefined || input?.displayName === null || input?.displayName === ''
+      ? null
+      : requireText(input.displayName, 120)
+    if (input?.displayName && (!displayName || displayName.length < 2)) {
+      throw new ServiceError(400, 'INVALID_MEMBERSHIP', 'O nome do profissional deve ter entre 2 e 120 caracteres.')
+    }
 
     const inviteToken = createOpaqueToken()
     const inviteTokenHash = hashToken(inviteToken)
@@ -1338,6 +1528,7 @@ export class AuthService {
       inviteTokenHash,
       inviteTokenCiphertext,
       expiresAt,
+      displayName,
     })
 
     return {
@@ -2045,6 +2236,35 @@ export class AuthService {
     })
   }
 
+  async listProfessionals(token, organizationId) {
+    const session = await this.getSession(token)
+    this.#requireAnyPermission(session, organizationId, [
+      'schedule.read', 'schedule.manage', 'clients.read', 'clients.manage', 'memberships.read',
+    ])
+    return this.repository.listProfessionals({ actorUserId: session.user.id, organizationId })
+  }
+
+  async createProfessional(token, organizationId, input) {
+    const session = await this.getSession(token)
+    this.#requireAnyPermission(session, organizationId, ['memberships.manage', 'schedule.manage'])
+    const displayName = requireText(input?.displayName, 120)
+    if (!displayName || displayName.length < 2) {
+      throw new ServiceError(400, 'INVALID_PROFESSIONAL', 'O nome do profissional deve ter entre 2 e 120 caracteres.')
+    }
+    const registrationNumber = input?.registrationNumber === undefined || input?.registrationNumber === null
+      || String(input.registrationNumber).trim() === ''
+      ? null
+      : requireText(input.registrationNumber, 80)
+    if (input?.registrationNumber && !registrationNumber) {
+      throw new ServiceError(400, 'INVALID_PROFESSIONAL', 'O registro profissional deve ter até 80 caracteres.')
+    }
+    return this.repository.createProfessional({
+      actorUserId: session.user.id,
+      organizationId,
+      professional: { displayName, registrationNumber },
+    })
+  }
+
   async getClient(token, organizationId, clientId) {
     const session = await this.getSession(token)
     this.#requirePermission(session, organizationId, 'clients.read')
@@ -2320,6 +2540,46 @@ export class AuthService {
       clientId,
       contract,
     })
+  }
+
+  async scheduleContractSessions(token, organizationId, clientId, contractId, input = {}) {
+    const session = await this.getSession(token)
+    this.#requirePermission(session, organizationId, 'schedule.manage')
+    if (!uuidPattern.test(clientId)) {
+      throw new ServiceError(404, 'CLIENT_NOT_FOUND', 'Cliente não encontrado.')
+    }
+    if (!uuidPattern.test(contractId)) {
+      throw new ServiceError(404, 'CONTRACT_NOT_FOUND', 'Contrato não encontrado.')
+    }
+    const serviceId = input?.serviceId === undefined || input?.serviceId === null || input?.serviceId === ''
+      ? null
+      : requireUuid(input.serviceId, 'INVALID_CONTRACT_SCHEDULE', 'Escolha o serviço das sessões.')
+    const unitId = requireUuid(input?.unitId, 'INVALID_CONTRACT_SCHEDULE', 'Escolha a unidade das sessões.')
+    try {
+      const prepared = await this.repository.prepareContractSessions({
+        actorUserId: session.user.id, organizationId, clientId, contractId, serviceId, unitId,
+      })
+      if (!prepared) throw new ServiceError(404, 'CONTRACT_NOT_FOUND', 'Contrato não encontrado.')
+      if (prepared.alreadyScheduled) return prepared
+      const occurrences = buildWeeklySlotOccurrences({
+        startsOn: prepared.startsOn,
+        sessionCount: prepared.sessionCount,
+        slots: prepared.scheduleSlots,
+      })
+      return await this.repository.scheduleContractSessions({
+        actorUserId: session.user.id,
+        organizationId,
+        clientId,
+        contractId,
+        serviceId: prepared.serviceId,
+        professionalId: prepared.professionalId,
+        unitId,
+        occurrences,
+        timezone: prepared.timezone,
+      })
+    } catch (error) {
+      throw this.#scheduleError(error)
+    }
   }
 
   async updateClientContract(token, organizationId, clientId, contractId, input) {
@@ -2624,6 +2884,26 @@ export class AuthService {
     }
   }
 
+  async listScheduleGrids(token, organizationId) {
+    const session = await this.getSession(token)
+    this.#requirePermission(session, organizationId, 'schedule.read')
+    return this.repository.listScheduleGrids({ actorUserId: session.user.id, organizationId })
+  }
+
+  async createScheduleGrid(token, organizationId, input) {
+    const session = await this.getSession(token)
+    this.#requirePermission(session, organizationId, 'schedule.manage')
+    try {
+      return await this.repository.createScheduleGrid({
+        actorUserId: session.user.id,
+        organizationId,
+        grid: normalizeScheduleGridInput(input),
+      })
+    } catch (error) {
+      throw this.#scheduleError(error)
+    }
+  }
+
   async addAppointmentParticipant(token, organizationId, appointmentId, input) {
     const session = await this.getSession(token)
     this.#requirePermission(session, organizationId, 'schedule.manage')
@@ -2785,6 +3065,9 @@ export class AuthService {
     }
     if (error?.code === '23503' || error?.code === '23514') {
       return new ServiceError(400, 'INVALID_APPOINTMENT_REFERENCE', 'Um recurso do agendamento está inativo ou indisponível.')
+    }
+    if (error?.code === '23505' && String(error.constraint ?? error.message).includes('schedule_grids')) {
+      return new ServiceError(409, 'SCHEDULE_GRID_DUPLICATE', 'Já existe uma grade com esse nome.')
     }
     if (error?.code === '23P01') {
       const message = String(error.message)

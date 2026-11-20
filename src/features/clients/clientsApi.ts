@@ -82,11 +82,16 @@ export interface ClientProfile {
     id: string
     planId?: string
     name: string
+    kind?: 'monthly' | 'package'
     startsOn: string
     endsOn: string | null
     status: string
     agreedPriceCents: number
     currency: string
+    sessionCount?: number | null
+    professionalId?: string | null
+    professionalName?: string | null
+    scheduleSlots?: Array<{ weekday: number; localTime: string }>
   }>
   finance: null | {
     openBalanceCents: number
@@ -235,6 +240,16 @@ export interface PlanRecord {
     [key: string]: unknown
   }
   active: boolean
+  kind?: 'monthly' | 'package'
+  sessionCount?: number | null
+  serviceId?: string | null
+}
+
+export interface ProfessionalOption {
+  id: string
+  displayName: string
+  registrationNumber?: string | null
+  active?: boolean
 }
 
 export interface ClientContractRecord {
@@ -257,6 +272,9 @@ export interface CreateContractInput {
   endsOn?: string | null
   agreedPriceCents?: number
   status?: 'active' | 'draft'
+  sessionCount?: number
+  professionalId?: string
+  scheduleSlots?: Array<{ weekday: number; localTime: string }>
 }
 
 export interface UpdateContractInput {
@@ -269,9 +287,30 @@ export function listPlans(organizationId: string) {
   return apiRequest<PlanRecord[]>(`/api/organizations/${organizationId}/plans`)
 }
 
+export function listProfessionals(organizationId: string) {
+  return apiRequest<ProfessionalOption[]>(`/api/organizations/${organizationId}/professionals`)
+}
+
+export function createProfessional(
+  organizationId: string,
+  input: { displayName: string; registrationNumber?: string | null },
+) {
+  return apiRequest<ProfessionalOption>(`/api/organizations/${organizationId}/professionals`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
 export function createPlan(
   organizationId: string,
-  input: { name: string; priceCents: number; billingRule?: Record<string, unknown> },
+  input: {
+    name: string
+    priceCents: number
+    billingRule?: Record<string, unknown>
+    kind?: 'monthly' | 'package'
+    sessionCount?: number
+    serviceId?: string | null
+  },
 ) {
   return apiRequest<PlanRecord>(`/api/organizations/${organizationId}/plans`, {
     method: 'POST',
@@ -292,6 +331,18 @@ export function createClientContract(
     method: 'POST',
     body: JSON.stringify(input),
   })
+}
+
+export function scheduleContractSessions(
+  organizationId: string,
+  clientId: string,
+  contractId: string,
+  input: { unitId: string; serviceId?: string | null },
+) {
+  return apiRequest<{ created: boolean; count: number; contractId?: string }>(
+    `${clientPath(organizationId, clientId)}/contracts/${contractId}/sessions`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
 }
 
 export function updateClientContract(
